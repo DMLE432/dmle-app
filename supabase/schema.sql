@@ -17,9 +17,15 @@ create table if not exists public.jobs (
   pickup_address text not null,
   dropoff_address text not null,
   specimen_type text not null,
+  pickup_at timestamptz not null,
   required_by timestamptz not null,
+  temperature_requirements text,
+  chain_of_custody_notes text,
+  special_instructions text,
+  offered_price numeric(10,2) not null check (offered_price > 0),
   notes text,
   status text not null default 'open' check (status in ('open', 'assigned', 'completed', 'cancelled')),
+  accepted_bid_id uuid,
   created_at timestamptz not null default now()
 );
 
@@ -31,8 +37,13 @@ create table if not exists public.bids (
   eta_minutes int not null check (eta_minutes > 0),
   note text,
   status text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  unique (job_id, courier_id)
 );
+
+alter table public.jobs
+  add constraint jobs_accepted_bid_id_fkey
+  foreign key (accepted_bid_id) references public.bids(id) on delete set null;
 
 alter table public.profiles enable row level security;
 alter table public.jobs enable row level security;
@@ -74,12 +85,23 @@ create policy "Shippers create jobs" on public.jobs
 create policy "Shippers read own jobs" on public.jobs
   for select using (auth.uid() = shipper_id);
 
+create policy "Shippers update own jobs" on public.jobs
+  for update using (auth.uid() = shipper_id)
+  with check (auth.uid() = shipper_id);
+
 create policy "Approved couriers read open jobs" on public.jobs
   for select using (
     status = 'open'
     and exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.role = 'courier' and p.courier_status = 'approved'
+    )
+  );
+
+create policy "Couriers read jobs they bid on" on public.jobs
+  for select using (
+    exists (
+      select 1 from public.bids b where b.job_id = id and b.courier_id = auth.uid()
     )
   );
 
@@ -98,6 +120,9 @@ create policy "Approved couriers submit bids" on public.bids
       select 1 from public.profiles p
       where p.id = auth.uid() and p.role = 'courier' and p.courier_status = 'approved'
     )
+    and exists (
+      select 1 from public.jobs j where j.id = job_id and j.status = 'open'
+    )
   );
 
 create policy "Couriers read own bids" on public.bids
@@ -105,6 +130,18 @@ create policy "Couriers read own bids" on public.bids
 
 create policy "Shippers read bids on own jobs" on public.bids
   for select using (
+    exists (
+      select 1 from public.jobs j where j.id = job_id and j.shipper_id = auth.uid()
+    )
+  );
+
+create policy "Shippers accept bids on own open jobs" on public.bids
+  for update using (
+    exists (
+      select 1 from public.jobs j where j.id = job_id and j.shipper_id = auth.uid() and j.status = 'open'
+    )
+  )
+  with check (
     exists (
       select 1 from public.jobs j where j.id = job_id and j.shipper_id = auth.uid()
     )

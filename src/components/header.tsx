@@ -1,9 +1,8 @@
 import Link from 'next/link';
 import { APP_NAME, roleLabels, UserRole } from '@/lib/constants';
+import { createClient } from '@/lib/supabase/server';
 
 export async function Header({ role }: { role?: UserRole }) {
-  const supabase = await createClient();
-
   async function signOut() {
     'use server';
     const client = await createClient();

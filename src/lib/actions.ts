@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getDashboardPath } from '@/lib/auth';
+import { getDashboardPath, requireRole } from '@/lib/auth';
 
 export async function signUpAction(formData: FormData) {
   const email = String(formData.get('email') || '');
@@ -56,54 +56,77 @@ export async function loginAction(formData: FormData) {
   redirect(getDashboardPath(profile?.role ?? 'shipper'));
 }
 
-export async function createJobAction(formData: FormData) {
-  const supabase = await createClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+function optionalText(value: FormDataEntryValue | null) {
+  const text = String(value || '').trim();
+  return text || null;
+}
 
-  if (!user) {
-    redirect('/login');
-  }
+export async function createJobAction(formData: FormData) {
+  const { user } = await requireRole(['shipper']);
+  const supabase = await createClient();
 
   await supabase.from('jobs').insert({
     shipper_id: user.id,
-    title: String(formData.get('title') || ''),
-    pickup_address: String(formData.get('pickup_address') || ''),
-    dropoff_address: String(formData.get('dropoff_address') || ''),
-    specimen_type: String(formData.get('specimen_type') || ''),
+    title: String(formData.get('title') || '').trim(),
+    pickup_address: String(formData.get('pickup_address') || '').trim(),
+    dropoff_address: String(formData.get('dropoff_address') || '').trim(),
+    specimen_type: String(formData.get('specimen_type') || '').trim(),
+    pickup_at: String(formData.get('pickup_at') || ''),
     required_by: String(formData.get('required_by') || ''),
-    notes: String(formData.get('notes') || '') || null,
+    temperature_requirements: optionalText(formData.get('temperature_requirements')),
+    chain_of_custody_notes: optionalText(formData.get('chain_of_custody_notes')),
+    special_instructions: optionalText(formData.get('special_instructions')),
+    offered_price: Number(formData.get('offered_price') || 0),
+    notes: optionalText(formData.get('notes')),
     status: 'open'
   });
 
   revalidatePath('/shipper');
+  revalidatePath('/courier');
+  revalidatePath('/admin');
 }
 
 export async function submitBidAction(formData: FormData) {
+  const { user } = await requireRole(['courier']);
   const supabase = await createClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect('/login');
-  }
 
   await supabase.from('bids').insert({
     job_id: String(formData.get('job_id') || ''),
     courier_id: user.id,
     amount: Number(formData.get('amount') || 0),
     eta_minutes: Number(formData.get('eta_minutes') || 0),
-    note: String(formData.get('note') || '') || null,
+    note: optionalText(formData.get('note')),
     status: 'pending'
   });
 
   revalidatePath('/courier');
   revalidatePath('/shipper');
+  revalidatePath('/admin');
+}
+
+export async function acceptBidAction(formData: FormData) {
+  await requireRole(['shipper']);
+  const supabase = await createClient();
+  const jobId = String(formData.get('job_id') || '');
+  const bidId = String(formData.get('bid_id') || '');
+
+  const { data: bidToAccept } = await supabase.from('bids').select('id').eq('id', bidId).eq('job_id', jobId).maybeSingle();
+
+  if (!bidToAccept) {
+    return;
+  }
+
+  await supabase.from('bids').update({ status: 'accepted' }).eq('id', bidId).eq('job_id', jobId);
+  await supabase.from('bids').update({ status: 'declined' }).eq('job_id', jobId).neq('id', bidId).eq('status', 'pending');
+  await supabase.from('jobs').update({ status: 'assigned', accepted_bid_id: bidId }).eq('id', jobId).eq('status', 'open');
+
+  revalidatePath('/shipper');
+  revalidatePath('/courier');
+  revalidatePath('/admin');
 }
 
 export async function reviewCourierAction(formData: FormData) {
+  await requireRole(['admin']);
   const supabase = await createClient();
   const profileId = String(formData.get('profile_id') || '');
   const decision = String(formData.get('decision') || 'pending') as 'approved' | 'rejected';

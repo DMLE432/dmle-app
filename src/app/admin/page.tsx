@@ -4,6 +4,14 @@ import { requireRole } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { reviewCourierAction } from '@/lib/actions';
 
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString();
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+}
+
 export default async function AdminPage() {
   await requireRole(['admin']);
   const supabase = await createClient();
@@ -17,8 +25,12 @@ export default async function AdminPage() {
   const { data: jobs } = await supabase
     .from('jobs')
     .select('*, profiles!jobs_shipper_id_fkey(full_name, organization_name), bids(*)')
-    .order('created_at', { ascending: false })
-    .limit(20);
+    .order('created_at', { ascending: false });
+
+  const { data: bids } = await supabase
+    .from('bids')
+    .select('*, jobs(title), profiles!bids_courier_id_fkey(full_name, organization_name)')
+    .order('created_at', { ascending: false });
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -53,19 +65,45 @@ export default async function AdminPage() {
           </div>
         </Card>
 
-        <Card title="Marketplace activity">
+        <Card title="All shipments">
           <div className="space-y-3">
             {jobs?.length ? (
               jobs.map((job) => (
                 <article key={job.id} className="rounded-lg border border-slate-200 p-3">
-                  <p className="font-medium">{job.title}</p>
-                  <p className="text-sm text-slate-600">By {job.profiles?.organization_name || job.profiles?.full_name}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium">{job.title}</p>
+                    <Badge tone={job.status === 'open' ? 'green' : 'slate'}>{job.status}</Badge>
+                  </div>
+                  <p className="text-sm text-slate-600">By {job.profiles?.organization_name || job.profiles?.full_name || 'Unknown shipper'}</p>
                   <p className="text-xs text-slate-500">{job.pickup_address} → {job.dropoff_address}</p>
-                  <p className="mt-2 text-sm">{job.bids.length} bids</p>
+                  <p className="text-xs text-slate-500">Pickup: {formatDateTime(job.pickup_at)} · Deadline: {formatDateTime(job.required_by)}</p>
+                  <p className="mt-2 text-sm">Offered: {formatMoney(job.offered_price)} · {job.bids.length} bids</p>
                 </article>
               ))
             ) : (
-              <p className="text-sm text-slate-500">No jobs yet.</p>
+              <p className="text-sm text-slate-500">No shipments yet.</p>
+            )}
+          </div>
+        </Card>
+
+        <Card title="All bids" className="lg:col-span-2">
+          <div className="grid gap-3 md:grid-cols-2">
+            {bids?.length ? (
+              bids.map((bid) => (
+                <article key={bid.id} className="rounded-lg border border-slate-200 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium">{bid.jobs?.title || 'Shipment'}</p>
+                    <Badge tone={bid.status === 'accepted' ? 'green' : bid.status === 'declined' ? 'red' : 'amber'}>{bid.status}</Badge>
+                  </div>
+                  <p className="text-sm text-slate-600">
+                    Courier: {bid.profiles?.organization_name || bid.profiles?.full_name || 'Unknown courier'}
+                  </p>
+                  <p className="text-sm text-slate-600">{formatMoney(bid.amount)} · ETA {bid.eta_minutes} min</p>
+                  {bid.note && <p className="mt-1 text-sm text-slate-500">{bid.note}</p>}
+                </article>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500">No bids submitted yet.</p>
             )}
           </div>
         </Card>
