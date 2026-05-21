@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Header } from '@/components/header';
 import { Badge, Card } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
@@ -71,7 +72,7 @@ export default async function AdminPage() {
               jobs.map((job) => (
                 <article key={job.id} className="rounded-lg border border-slate-200 p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium">{job.title}</p>
+                    <Link href={`/shipments/${job.id}`} className="font-medium text-brand-700 hover:underline">{job.title}</Link>
                     <Badge tone={job.status === 'open' ? 'green' : 'slate'}>{job.status}</Badge>
                   </div>
                   <p className="text-sm text-slate-600">By {job.profiles?.organization_name || job.profiles?.full_name || 'Unknown shipper'}</p>

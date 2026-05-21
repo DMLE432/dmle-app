@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Header } from '@/components/header';
 import { Badge, Card } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
@@ -67,7 +68,7 @@ export default async function ShipperPage() {
                 <article key={job.id} className="rounded-lg border border-slate-200 p-4">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
-                      <p className="font-medium">{job.title}</p>
+                      <Link href={`/shipments/${job.id}`} className="font-medium text-brand-700 hover:underline">{job.title}</Link>
                       <p className="text-xs text-slate-500">Offered price: {formatMoney(job.offered_price)}</p>
                     </div>
                     <Badge tone={job.status === 'open' ? 'green' : 'slate'}>{job.status}</Badge>
