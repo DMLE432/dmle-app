@@ -1,9 +1,9 @@
 # DMLE MVP (Direct Med Logistics Exchange)
 
 Next.js + Supabase MVP for a medical courier marketplace with three roles:
-- **Shipper**: posts delivery jobs and views bids.
-- **Courier**: views open jobs and submits bids (after admin approval).
-- **Admin**: approves/rejects courier onboarding and monitors marketplace activity.
+- **Shipper**: posts shipment requests with medical handling details, views bids, and accepts a courier bid.
+- **Courier**: views open shipments and submits bids with price, ETA, and notes after admin approval.
+- **Admin**: approves/rejects courier onboarding and monitors all shipments and bids.
 
 ## Stack
 - Next.js App Router + TypeScript + Tailwind CSS
@@ -30,9 +30,9 @@ Next.js + Supabase MVP for a medical courier marketplace with three roles:
 
 ## Implemented MVP modules
 - Authentication and role-based access.
-- Shipper dashboard with job posting + job list.
-- Courier dashboard with open jobs + bid submission.
-- Admin dashboard with courier approval flow + activity feed.
+- Shipper dashboard with shipment posting, bid review, and bid acceptance.
+- Courier dashboard with available shipments and bid submission.
+- Admin dashboard with courier approval flow plus all-shipment and all-bid views.
 - Modular data model for future payment/maps/tracking extensions.
 
 ## App routes

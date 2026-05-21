@@ -1,6 +1,6 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       profiles: {
@@ -21,6 +21,7 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database['public']['Tables']['profiles']['Insert']>;
+        Relationships: [];
       };
       jobs: {
         Row: {
@@ -30,9 +31,15 @@ export interface Database {
           pickup_address: string;
           dropoff_address: string;
           specimen_type: string;
+          pickup_at: string;
           required_by: string;
+          temperature_requirements: string | null;
+          chain_of_custody_notes: string | null;
+          special_instructions: string | null;
+          offered_price: number;
           notes: string | null;
           status: 'open' | 'assigned' | 'completed' | 'cancelled';
+          accepted_bid_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -42,12 +49,32 @@ export interface Database {
           pickup_address: string;
           dropoff_address: string;
           specimen_type: string;
+          pickup_at: string;
           required_by: string;
+          temperature_requirements?: string | null;
+          chain_of_custody_notes?: string | null;
+          special_instructions?: string | null;
+          offered_price: number;
           notes?: string | null;
           status?: 'open' | 'assigned' | 'completed' | 'cancelled';
+          accepted_bid_id?: string | null;
           created_at?: string;
         };
         Update: Partial<Database['public']['Tables']['jobs']['Insert']>;
+        Relationships: [
+          {
+            foreignKeyName: 'jobs_shipper_id_fkey';
+            columns: ['shipper_id'];
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'jobs_accepted_bid_id_fkey';
+            columns: ['accepted_bid_id'];
+            referencedRelation: 'bids';
+            referencedColumns: ['id'];
+          }
+        ];
       };
       bids: {
         Row: {
@@ -71,6 +98,20 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database['public']['Tables']['bids']['Insert']>;
+        Relationships: [
+          {
+            foreignKeyName: 'bids_job_id_fkey';
+            columns: ['job_id'];
+            referencedRelation: 'jobs';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'bids_courier_id_fkey';
+            columns: ['courier_id'];
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          }
+        ];
       };
     };
     Views: Record<string, never>;
@@ -78,4 +119,4 @@ export interface Database {
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
-}
+};
