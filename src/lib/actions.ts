@@ -151,7 +151,9 @@ export async function addShipmentStatusAction(formData: FormData) {
     .eq('id', jobId)
     .maybeSingle();
 
-  if (!assignedBid || assignedBid.bids?.courier_id !== user.id) return;
+  const assignedCourierId = assignedBid?.bids?.[0]?.courier_id;
+
+  if (!assignedBid || assignedCourierId !== user.id) return;
 
   let proofUrl: string | null = null;
   let proofName: string | null = null;
