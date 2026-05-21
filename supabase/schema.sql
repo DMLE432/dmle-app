@@ -41,6 +41,17 @@ create table if not exists public.bids (
   unique (job_id, courier_id)
 );
 
+create table if not exists public.job_status_events (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references public.jobs(id) on delete cascade,
+  status text not null check (status in ('assigned', 'accepted', 'en_route_to_pickup', 'picked_up', 'in_transit', 'delivered')),
+  note text,
+  proof_url text,
+  proof_name text,
+  created_by uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
 alter table public.jobs
   add constraint jobs_accepted_bid_id_fkey
   foreign key (accepted_bid_id) references public.bids(id) on delete set null;
@@ -48,6 +59,7 @@ alter table public.jobs
 alter table public.profiles enable row level security;
 alter table public.jobs enable row level security;
 alter table public.bids enable row level security;
+alter table public.job_status_events enable row level security;
 
 -- Profiles
 create policy "Users read own profile" on public.profiles
@@ -153,3 +165,42 @@ create policy "Admins read all bids" on public.bids
       select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'
     )
   );
+
+-- Job status events
+create policy "Assigned courier create status events" on public.job_status_events
+  for insert with check (
+    auth.uid() = created_by
+    and exists (
+      select 1 from public.jobs j
+      join public.bids b on b.id = j.accepted_bid_id
+      where j.id = job_id and b.courier_id = auth.uid()
+    )
+  );
+
+create policy "Assigned courier read status events" on public.job_status_events
+  for select using (
+    exists (
+      select 1 from public.jobs j
+      join public.bids b on b.id = j.accepted_bid_id
+      where j.id = job_id and b.courier_id = auth.uid()
+    )
+  );
+
+create policy "Shippers read own job status events" on public.job_status_events
+  for select using (
+    exists (
+      select 1 from public.jobs j where j.id = job_id and j.shipper_id = auth.uid()
+    )
+  );
+
+create policy "Admins read all status events" on public.job_status_events
+  for select using (
+    exists (
+      select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'
+    )
+  );
+
+-- Storage setup notes (run in Supabase SQL editor)
+-- insert into storage.buckets (id, name, public) values ('shipment-proofs', 'shipment-proofs', false)
+-- on conflict (id) do nothing;
+-- Allow assigned courier uploads and authorized role reads from shipment-proofs bucket.

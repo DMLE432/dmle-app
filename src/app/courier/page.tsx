@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Header } from '@/components/header';
 import { Badge, Card } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
@@ -45,7 +46,7 @@ export default async function CourierPage() {
                 <article key={job.id} className="space-y-3 rounded-lg border border-slate-200 p-4">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <p className="font-medium">{job.title}</p>
+                      <Link href={`/shipments/${job.id}`} className="font-medium text-brand-700 hover:underline">{job.title}</Link>
                       <p className="text-xs text-slate-500">Offered price: {formatMoney(job.offered_price)}</p>
                     </div>
                     <Badge tone="green">open</Badge>
@@ -86,7 +87,7 @@ export default async function CourierPage() {
             {myBids?.length ? (
               myBids.map((bid) => (
                 <article key={bid.id} className="rounded-lg border border-slate-200 p-3">
-                  <p className="font-medium">{bid.jobs?.title}</p>
+                  <Link href={`/shipments/${bid.job_id}`} className="font-medium text-brand-700 hover:underline">{bid.jobs?.title}</Link>
                   <p className="text-sm text-slate-600">{formatMoney(bid.amount)} · ETA {bid.eta_minutes} min</p>
                   {bid.jobs && (
                     <p className="mt-1 text-xs text-slate-500">

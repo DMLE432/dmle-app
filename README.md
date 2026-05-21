@@ -33,6 +33,8 @@ Next.js + Supabase MVP for a medical courier marketplace with three roles:
 - Shipper dashboard with shipment posting, bid review, and bid acceptance.
 - Courier dashboard with available shipments and bid submission.
 - Admin dashboard with courier approval flow plus all-shipment and all-bid views.
+- Shipment detail workflow with role-aware timeline visibility and courier status updates.
+- Courier proof upload support for pickup/delivery evidence and delivery notes.
 - Modular data model for future payment/maps/tracking extensions.
 
 ## App routes
@@ -41,4 +43,16 @@ Next.js + Supabase MVP for a medical courier marketplace with three roles:
 - `/shipper`
 - `/courier`
 - `/admin`
+- `/shipments/[id]`
 - `/dashboard` role-aware redirector
+
+## Supabase storage setup (required for proof uploads)
+Run in Supabase SQL editor after the schema migration:
+
+```sql
+insert into storage.buckets (id, name, public)
+values ('shipment-proofs', 'shipment-proofs', false)
+on conflict (id) do nothing;
+```
+
+Then add storage policies for `storage.objects` scoped to `bucket_id = 'shipment-proofs'` so assigned couriers can upload and authorized users (assigned courier, shipper, admin) can read proof objects.

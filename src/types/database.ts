@@ -76,6 +76,43 @@ export type Database = {
           }
         ];
       };
+      job_status_events: {
+        Row: {
+          id: string;
+          job_id: string;
+          status: 'assigned' | 'accepted' | 'en_route_to_pickup' | 'picked_up' | 'in_transit' | 'delivered';
+          note: string | null;
+          proof_url: string | null;
+          proof_name: string | null;
+          created_by: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          job_id: string;
+          status: 'assigned' | 'accepted' | 'en_route_to_pickup' | 'picked_up' | 'in_transit' | 'delivered';
+          note?: string | null;
+          proof_url?: string | null;
+          proof_name?: string | null;
+          created_by: string;
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['job_status_events']['Insert']>;
+        Relationships: [
+          {
+            foreignKeyName: 'job_status_events_job_id_fkey';
+            columns: ['job_id'];
+            referencedRelation: 'jobs';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'job_status_events_created_by_fkey';
+            columns: ['created_by'];
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
       bids: {
         Row: {
           id: string;

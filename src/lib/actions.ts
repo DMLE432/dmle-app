@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getDashboardPath, requireRole } from '@/lib/auth';
 
+const COURIER_STATUSES = ['accepted', 'en_route_to_pickup', 'picked_up', 'in_transit', 'delivered'] as const;
+
 export async function signUpAction(formData: FormData) {
   const email = String(formData.get('email') || '');
   const password = String(formData.get('password') || '');
@@ -119,9 +121,59 @@ export async function acceptBidAction(formData: FormData) {
   await supabase.from('bids').update({ status: 'accepted' }).eq('id', bidId).eq('job_id', jobId);
   await supabase.from('bids').update({ status: 'declined' }).eq('job_id', jobId).neq('id', bidId).eq('status', 'pending');
   await supabase.from('jobs').update({ status: 'assigned', accepted_bid_id: bidId }).eq('id', jobId).eq('status', 'open');
+  await supabase.from('job_status_events').insert({
+    job_id: jobId,
+    status: 'assigned',
+    note: 'Bid accepted by shipper. Shipment assigned to courier.',
+    created_by: (await supabase.auth.getUser()).data.user?.id
+  });
 
   revalidatePath('/shipper');
   revalidatePath('/courier');
+  revalidatePath('/admin');
+}
+
+export async function addShipmentStatusAction(formData: FormData) {
+  const { user } = await requireRole(['courier']);
+  const supabase = await createClient();
+  const jobId = String(formData.get('job_id') || '');
+  const status = String(formData.get('status') || '');
+  const note = optionalText(formData.get('note'));
+  const proof = formData.get('proof') as File | null;
+
+  if (!COURIER_STATUSES.includes(status as (typeof COURIER_STATUSES)[number])) {
+    return;
+  }
+
+  const { data: assignedBid } = await supabase
+    .from('jobs')
+    .select('id, accepted_bid_id, bids!jobs_accepted_bid_id_fkey(courier_id)')
+    .eq('id', jobId)
+    .maybeSingle();
+
+  if (!assignedBid || assignedBid.bids?.courier_id !== user.id) return;
+
+  let proofUrl: string | null = null;
+  let proofName: string | null = null;
+  if (proof && proof.size > 0) {
+    const extension = proof.name.includes('.') ? proof.name.split('.').pop() : 'bin';
+    const path = `${jobId}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+    const { error: uploadError } = await supabase.storage.from('shipment-proofs').upload(path, proof, { upsert: false });
+    if (!uploadError) {
+      proofUrl = path;
+      proofName = proof.name;
+    }
+  }
+
+  await supabase.from('job_status_events').insert({ job_id: jobId, status, note, proof_url: proofUrl, proof_name: proofName, created_by: user.id });
+
+  if (status === 'delivered') {
+    await supabase.from('jobs').update({ status: 'completed' }).eq('id', jobId);
+  }
+
+  revalidatePath(`/shipments/${jobId}`);
+  revalidatePath('/courier');
+  revalidatePath('/shipper');
   revalidatePath('/admin');
 }
 
