@@ -17,19 +17,31 @@ export async function signUpAction(formData: FormData) {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({ email, password });
 
-  if (error || !data.user) {
-    redirect('/signup?error=Unable to create account');
+  if (error) {
+    console.error('Supabase signup error:', error);
+    redirect(`/signup?error=${encodeURIComponent(error.message)}`);
+  }
+
+  if (!data.user) {
+    const message = 'No user returned from Supabase signup';
+    console.error(message);
+    redirect(`/signup?error=${encodeURIComponent(message)}`);
   }
 
   const courierStatus = role === 'courier' ? 'pending' : null;
 
-  await supabase.from('profiles').insert({
+  const { error: profileError } = await supabase.from('profiles').insert({
     id: data.user.id,
     full_name: fullName,
     role,
     organization_name: organization || null,
     courier_status: courierStatus
   });
+
+  if (profileError) {
+    console.error('Profile insert error:', profileError);
+    redirect(`/signup?error=${encodeURIComponent(profileError.message)}`);
+  }
 
   redirect(role === 'courier' ? '/courier?notice=Approval pending' : '/shipper');
 }
