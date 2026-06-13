@@ -1,8 +1,13 @@
 import Link from 'next/link';
 import { signUpAction } from '@/lib/actions';
 
-export default async function SignUpPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+type SignUpSearchParams = {
+  error?: string | string[];
+};
+
+export default async function SignUpPage({ searchParams }: { searchParams: Promise<SignUpSearchParams> }) {
   const params = await searchParams;
+  const errorMessage = Array.isArray(params.error) ? params.error[0] : params.error;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center px-6">
@@ -31,7 +36,7 @@ export default async function SignUpPage({ searchParams }: { searchParams: Promi
           <label className="mb-1 block text-sm font-medium">Organization name</label>
           <input name="organization_name" placeholder="Hospital, clinic, lab, or courier service" />
         </div>
-        {params.error && <p className="text-sm text-rose-600">{params.error}</p>}
+        {errorMessage && <p className="text-sm text-rose-600">{errorMessage}</p>}
         <button type="submit" className="w-full bg-brand-500 text-white hover:bg-brand-700">
           Create account
         </button>
