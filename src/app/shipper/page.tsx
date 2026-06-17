@@ -7,6 +7,12 @@ import { createClient } from '@/lib/supabase/server';
 import { Database } from '@/types/database';
 
 type Bid = Database['public']['Tables']['bids']['Row'];
+type ShipperSearchParams = {
+  error?: string | string[];
+};
+
+const NO_PHI_HELPER_TEXT =
+  'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
@@ -16,9 +22,15 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
-export default async function ShipperPage() {
+function getErrorMessage(error?: string | string[]) {
+  return Array.isArray(error) ? error[0] : error;
+}
+
+export default async function ShipperPage({ searchParams }: { searchParams: Promise<ShipperSearchParams> }) {
   const { user } = await requireRole(['shipper']);
   const supabase = await createClient();
+  const params = await searchParams;
+  const errorMessage = getErrorMessage(params.error);
 
   const { data: jobs } = await supabase
     .from('jobs')
@@ -32,6 +44,8 @@ export default async function ShipperPage() {
       <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[1fr_1.15fr]">
         <Card title="Create a shipment request">
           <form action={createJobAction} className="space-y-3">
+            {errorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
+            <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{NO_PHI_HELPER_TEXT}</p>
             <input name="title" placeholder="Shipment title (e.g. STAT blood sample to central lab)" required />
             <div className="grid gap-3 md:grid-cols-2">
               <input name="pickup_address" placeholder="Pickup address" required />
