@@ -6,6 +6,14 @@ import { addShipmentStatusAction } from '@/lib/actions';
 import { requireRole } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 
+type ShipmentSearchParams = {
+  error?: string | string[];
+};
+
+const NO_PHI_HELPER_TEXT =
+  'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
+const PROOF_NO_PHI_HELPER_TEXT = `Do not upload proof files containing PHI. ${NO_PHI_HELPER_TEXT}`;
+
 const statusOptions = [
   { value: 'accepted', label: 'Accepted' },
   { value: 'en_route_to_pickup', label: 'En route to pickup' },
@@ -17,10 +25,22 @@ const statusOptions = [
 const formatDateTime = (value: string) => new Date(value).toLocaleString();
 const formatMoney = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 
-export default async function ShipmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
+function getErrorMessage(error?: string | string[]) {
+  return Array.isArray(error) ? error[0] : error;
+}
+
+export default async function ShipmentDetailPage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<ShipmentSearchParams>;
+}) {
   const { user, profile } = await requireRole(['shipper', 'courier', 'admin']);
   const supabase = await createClient();
   const { id } = await params;
+  const query = await searchParams;
+  const errorMessage = getErrorMessage(query.error);
 
   const { data: job } = await supabase
     .from('jobs')
@@ -49,6 +69,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
           <h1 className="text-2xl font-semibold text-slate-900">Shipment details</h1>
           <Badge tone={job.status === 'completed' ? 'green' : 'slate'}>{job.status}</Badge>
         </div>
+        {errorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
 
         <Card title={job.title}>
           <div className="grid gap-3 text-sm text-slate-700 md:grid-cols-2">
@@ -78,10 +99,12 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
               <label className="text-sm font-medium text-slate-700">
                 Proof file (pickup/delivery)
                 <input type="file" name="proof" className="mt-1" accept="image/*,.pdf,.doc,.docx" />
+                <span className="mt-2 block rounded-md bg-amber-50 p-3 text-sm font-normal text-amber-800">{PROOF_NO_PHI_HELPER_TEXT}</span>
               </label>
               <label className="text-sm font-medium text-slate-700 md:col-span-2">
                 Delivery note
                 <textarea name="note" rows={3} className="mt-1" placeholder="Optional note for timeline" />
+                <span className="mt-2 block rounded-md bg-amber-50 p-3 text-sm font-normal text-amber-800">{NO_PHI_HELPER_TEXT}</span>
               </label>
               <button type="submit" className="w-fit bg-brand-500 text-white hover:bg-brand-700">Save update</button>
             </form>
