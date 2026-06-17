@@ -5,6 +5,13 @@ import { requireRole } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { submitBidAction } from '@/lib/actions';
 
+type CourierSearchParams = {
+  error?: string | string[];
+};
+
+const NO_PHI_HELPER_TEXT =
+  'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
 }
@@ -13,9 +20,15 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
-export default async function CourierPage() {
+function getErrorMessage(error?: string | string[]) {
+  return Array.isArray(error) ? error[0] : error;
+}
+
+export default async function CourierPage({ searchParams }: { searchParams: Promise<CourierSearchParams> }) {
   const { user, profile } = await requireRole(['courier']);
   const supabase = await createClient();
+  const params = await searchParams;
+  const errorMessage = getErrorMessage(params.error);
 
   const { data: jobs } = await supabase.from('jobs').select('*').eq('status', 'open').order('created_at', { ascending: false });
 
@@ -33,6 +46,7 @@ export default async function CourierPage() {
       <Header role="courier" />
       <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[1.2fr_0.8fr]">
         <Card title="Available shipments">
+          {errorMessage && <p className="mb-4 rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
           {!canBid && (
             <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-800">
               Your courier profile is <strong>{profile.courier_status}</strong>. Admin approval is required before bidding.
@@ -68,6 +82,7 @@ export default async function CourierPage() {
                       <input type="number" min="1" step="0.01" name="amount" placeholder="Bid price ($)" required disabled={!canBid} />
                       <input type="number" min="1" step="1" name="eta_minutes" placeholder="ETA (min)" required disabled={!canBid} />
                       <div className="md:col-span-3">
+                        <p className="mb-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800">{NO_PHI_HELPER_TEXT}</p>
                         <input name="note" placeholder="Bid notes" disabled={!canBid} />
                       </div>
                       <button type="submit" disabled={!canBid} className="bg-brand-500 text-white hover:bg-brand-700 disabled:bg-slate-300">
