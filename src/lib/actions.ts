@@ -29,6 +29,11 @@ function redirectWithError(path: string, message: string): never {
   redirect(`${path}?error=${encodeURIComponent(message)}`);
 }
 
+function redirectWithLoggedError(path: string, logMessage: string, error: unknown, userMessage: string): never {
+  console.error(logMessage, error);
+  redirectWithError(path, userMessage);
+}
+
 function validateNoPhiLabels(fields: Record<string, string | null>) {
   for (const [fieldName, value] of Object.entries(fields)) {
     if (!value) continue;
@@ -154,8 +159,7 @@ export async function createJobAction(formData: FormData) {
   });
 
   if (error) {
-    console.error('Create shipment error:', error);
-    redirectWithError('/shipper', `Unable to create shipment: ${error.message}`);
+    redirectWithLoggedError('/shipper', 'Create shipment error:', error, 'Unable to create shipment. Please check the details and try again.');
   }
 
   revalidatePath('/shipper');
@@ -183,8 +187,7 @@ export async function submitBidAction(formData: FormData) {
   });
 
   if (error) {
-    console.error('Submit bid error:', error);
-    redirectWithError('/courier', `Unable to submit bid: ${error.message}`);
+    redirectWithLoggedError('/courier', 'Submit bid error:', error, 'Unable to submit bid. Please check your bid and try again.');
   }
 
   revalidatePath('/courier');
@@ -193,30 +196,98 @@ export async function submitBidAction(formData: FormData) {
 }
 
 export async function acceptBidAction(formData: FormData) {
-  await requireRole(['shipper']);
+  const { user } = await requireRole(['shipper']);
   const supabase = await createClient();
   const jobId = String(formData.get('job_id') || '');
   const bidId = String(formData.get('bid_id') || '');
 
-  const { data: bidToAccept } = await supabase.from('bids').select('id').eq('id', bidId).eq('job_id', jobId).maybeSingle();
-
-  if (!bidToAccept) {
-    return;
+  if (!jobId || !bidId) {
+    redirectWithError('/shipper', 'Unable to accept bid. Missing shipment or bid details.');
   }
 
-  await supabase.from('bids').update({ status: 'accepted' }).eq('id', bidId).eq('job_id', jobId);
-  await supabase.from('bids').update({ status: 'declined' }).eq('job_id', jobId).neq('id', bidId).eq('status', 'pending');
-  await supabase.from('jobs').update({ status: 'assigned', accepted_bid_id: bidId }).eq('id', jobId).eq('status', 'open');
-  await supabase.from('job_status_events').insert({
+  const { data: openJob, error: openJobError } = await supabase.from('jobs').select('id').eq('id', jobId).eq('status', 'open').maybeSingle();
+
+  if (openJobError) {
+    redirectWithLoggedError('/shipper', 'Accept bid job lookup error:', openJobError, 'Unable to accept bid. Please try again.');
+  }
+
+  if (!openJob) {
+    redirectWithError('/shipper', 'Unable to accept bid. This shipment is no longer open.');
+  }
+
+  const { data: bidToAccept, error: bidLookupError } = await supabase
+    .from('bids')
+    .select('id')
+    .eq('id', bidId)
+    .eq('job_id', jobId)
+    .maybeSingle();
+
+  if (bidLookupError) {
+    redirectWithLoggedError('/shipper', 'Accept bid lookup error:', bidLookupError, 'Unable to accept bid. Please try again.');
+  }
+
+  if (!bidToAccept) {
+    redirectWithError('/shipper', 'Unable to accept bid. The bid was not found or is no longer available.');
+  }
+
+  const { data: acceptedBid, error: acceptBidError } = await supabase
+    .from('bids')
+    .update({ status: 'accepted' })
+    .eq('id', bidId)
+    .eq('job_id', jobId)
+    .select('id')
+    .maybeSingle();
+
+  if (acceptBidError) {
+    redirectWithLoggedError('/shipper', 'Accept bid update error:', acceptBidError, 'Unable to accept bid. Please try again.');
+  }
+
+  if (!acceptedBid) {
+    redirectWithError('/shipper', 'Unable to accept bid. The bid could not be updated.');
+  }
+
+  const { error: declineBidsError } = await supabase.from('bids').update({ status: 'declined' }).eq('job_id', jobId).neq('id', bidId).eq('status', 'pending');
+
+  if (declineBidsError) {
+    redirectWithLoggedError('/shipper', 'Decline competing bids error:', declineBidsError, 'Bid was accepted, but competing bids could not be declined. Please contact admin.');
+  }
+
+  const { data: assignedJob, error: assignJobError } = await supabase
+    .from('jobs')
+    .update({ status: 'assigned', accepted_bid_id: bidId })
+    .eq('id', jobId)
+    .eq('status', 'open')
+    .select('id')
+    .maybeSingle();
+
+  if (assignJobError) {
+    redirectWithLoggedError('/shipper', 'Assign shipment error:', assignJobError, 'Bid was accepted, but the shipment could not be assigned. Please contact admin.');
+  }
+
+  if (!assignedJob) {
+    redirectWithError('/shipper', 'Bid was accepted, but the shipment was not assigned because it is no longer open. Please contact admin.');
+  }
+
+  const { error: statusEventError } = await supabase.from('job_status_events').insert({
     job_id: jobId,
     status: 'assigned',
     note: 'Bid accepted by shipper. Shipment assigned to courier.',
-    created_by: (await supabase.auth.getUser()).data.user?.id
+    created_by: user.id
   });
+
+  if (statusEventError) {
+    console.error('Assignment status event error:', statusEventError);
+    revalidatePath('/shipper');
+    revalidatePath('/courier');
+    revalidatePath('/admin');
+    revalidatePath(`/shipments/${jobId}`);
+    redirectWithError('/shipper', 'Bid was accepted, but the assignment timeline could not be recorded. Please contact admin.');
+  }
 
   revalidatePath('/shipper');
   revalidatePath('/courier');
   revalidatePath('/admin');
+  revalidatePath(`/shipments/${jobId}`);
 }
 
 export async function addShipmentStatusAction(formData: FormData) {
@@ -248,8 +319,7 @@ export async function addShipmentStatusAction(formData: FormData) {
     .maybeSingle();
 
   if (assignedBidError) {
-    console.error('Shipment assignment lookup error:', assignedBidError);
-    redirectWithError(errorPath, `Unable to verify shipment assignment: ${assignedBidError.message}`);
+    redirectWithLoggedError(errorPath, 'Shipment assignment lookup error:', assignedBidError, 'Unable to verify shipment assignment. Please try again.');
   }
 
   const assignedCourierId = assignedBid?.bids?.[0]?.courier_id;
@@ -265,8 +335,7 @@ export async function addShipmentStatusAction(formData: FormData) {
     const path = `${jobId}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
     const { error: uploadError } = await supabase.storage.from('shipment-proofs').upload(path, proof, { upsert: false });
     if (uploadError) {
-      console.error('Proof upload error:', uploadError);
-      redirectWithError(errorPath, `Unable to upload proof of delivery: ${uploadError.message}`);
+      redirectWithLoggedError(errorPath, 'Proof upload error:', uploadError, 'Unable to upload proof of delivery. Please try again with a logistics-safe file.');
     }
 
     proofUrl = path;
@@ -278,8 +347,7 @@ export async function addShipmentStatusAction(formData: FormData) {
     .insert({ job_id: jobId, status, note, proof_url: proofUrl, proof_name: proofName, created_by: user.id });
 
   if (statusEventError) {
-    console.error('Shipment status event error:', statusEventError);
-    redirectWithError(errorPath, `Unable to save status update: ${statusEventError.message}`);
+    redirectWithLoggedError(errorPath, 'Shipment status event error:', statusEventError, 'Unable to save status update. Please try again.');
   }
 
   if (status === 'delivered') {
@@ -287,7 +355,11 @@ export async function addShipmentStatusAction(formData: FormData) {
 
     if (completeJobError) {
       console.error('Complete shipment error:', completeJobError);
-      redirectWithError(errorPath, `Unable to mark shipment completed: ${completeJobError.message}`);
+      revalidatePath(`/shipments/${jobId}`);
+      revalidatePath('/courier');
+      revalidatePath('/shipper');
+      revalidatePath('/admin');
+      redirectWithError(errorPath, 'Status update was saved, but the shipment could not be marked completed. Please contact admin.');
     }
   }
 
@@ -301,9 +373,17 @@ export async function reviewCourierAction(formData: FormData) {
   await requireRole(['admin']);
   const supabase = await createClient();
   const profileId = String(formData.get('profile_id') || '');
-  const decision = String(formData.get('decision') || 'pending') as 'approved' | 'rejected';
+  const decision = String(formData.get('decision') || '');
 
-  await supabase.from('profiles').update({ courier_status: decision }).eq('id', profileId);
+  if (!profileId || (decision !== 'approved' && decision !== 'rejected')) {
+    redirectWithError('/admin', 'Unable to update courier review. Missing courier or review decision.');
+  }
+
+  const { error } = await supabase.from('profiles').update({ courier_status: decision }).eq('id', profileId);
+
+  if (error) {
+    redirectWithLoggedError('/admin', 'Review courier error:', error, 'Unable to update courier review. Please try again.');
+  }
 
   revalidatePath('/admin');
   revalidatePath('/courier');
