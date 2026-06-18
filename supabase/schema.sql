@@ -101,6 +101,22 @@ create policy "Shippers update own jobs" on public.jobs
   for update using (auth.uid() = shipper_id)
   with check (auth.uid() = shipper_id);
 
+create policy "Assigned couriers complete jobs" on public.jobs
+  for update using (
+    status = 'assigned'
+    and exists (
+      select 1 from public.bids b
+      where b.id = accepted_bid_id and b.courier_id = auth.uid() and b.status = 'accepted'
+    )
+  )
+  with check (
+    status = 'completed'
+    and exists (
+      select 1 from public.bids b
+      where b.id = accepted_bid_id and b.courier_id = auth.uid() and b.status = 'accepted'
+    )
+  );
+
 create policy "Approved couriers read open jobs" on public.jobs
   for select using (
     status = 'open'
