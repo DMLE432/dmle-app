@@ -177,6 +177,22 @@ create policy "Assigned courier create status events" on public.job_status_event
     )
   );
 
+create policy "Shippers create assignment status events" on public.job_status_events
+  for insert with check (
+    auth.uid() = created_by
+    and status = 'assigned'
+    and proof_url is null
+    and proof_name is null
+    and exists (
+      select 1 from public.jobs j
+      join public.bids b on b.id = j.accepted_bid_id
+      where j.id = job_id
+        and j.shipper_id = auth.uid()
+        and j.status = 'assigned'
+        and b.status = 'accepted'
+    )
+  );
+
 create policy "Assigned courier read status events" on public.job_status_events
   for select using (
     exists (
