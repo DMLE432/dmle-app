@@ -351,10 +351,18 @@ export async function addShipmentStatusAction(formData: FormData) {
   }
 
   if (status === 'delivered') {
-    const { error: completeJobError } = await supabase.from('jobs').update({ status: 'completed' }).eq('id', jobId);
+    const { data: completedJob, error: completeJobError } = await supabase.from('jobs').update({ status: 'completed' }).eq('id', jobId).select('id').maybeSingle();
 
     if (completeJobError) {
       console.error('Complete shipment error:', completeJobError);
+      revalidatePath(`/shipments/${jobId}`);
+      revalidatePath('/courier');
+      revalidatePath('/shipper');
+      revalidatePath('/admin');
+      redirectWithError(errorPath, 'Status update was saved, but the shipment could not be marked completed. Please contact admin.');
+    }
+
+    if (!completedJob) {
       revalidatePath(`/shipments/${jobId}`);
       revalidatePath('/courier');
       revalidatePath('/shipper');
@@ -379,10 +387,14 @@ export async function reviewCourierAction(formData: FormData) {
     redirectWithError('/admin', 'Unable to update courier review. Missing courier or review decision.');
   }
 
-  const { error } = await supabase.from('profiles').update({ courier_status: decision }).eq('id', profileId);
+  const { data: reviewedCourier, error } = await supabase.from('profiles').update({ courier_status: decision }).eq('id', profileId).select('id').maybeSingle();
 
   if (error) {
     redirectWithLoggedError('/admin', 'Review courier error:', error, 'Unable to update courier review. Please try again.');
+  }
+
+  if (!reviewedCourier) {
+    redirectWithError('/admin', 'Unable to update courier review. The courier profile was not found.');
   }
 
   revalidatePath('/admin');
