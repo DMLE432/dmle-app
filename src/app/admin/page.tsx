@@ -5,6 +5,10 @@ import { requireRole } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { reviewCourierAction } from '@/lib/actions';
 
+type AdminSearchParams = {
+  error?: string | string[];
+};
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
 }
@@ -13,9 +17,15 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
-export default async function AdminPage() {
+function getErrorMessage(error?: string | string[]) {
+  return Array.isArray(error) ? error[0] : error;
+}
+
+export default async function AdminPage({ searchParams }: { searchParams: Promise<AdminSearchParams> }) {
   await requireRole(['admin']);
   const supabase = await createClient();
+  const params = await searchParams;
+  const errorMessage = getErrorMessage(params.error);
 
   const { data: couriers } = await supabase
     .from('profiles')
@@ -37,6 +47,7 @@ export default async function AdminPage() {
     <main className="min-h-screen bg-slate-50">
       <Header role="admin" />
       <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-2">
+        {errorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700 lg:col-span-2">{errorMessage}</p>}
         <Card title="Courier approvals">
           <div className="space-y-3">
             {couriers?.length ? (
