@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createActionClient } from '@/lib/supabase/server';
 import { getDashboardPath, requireRole } from '@/lib/auth';
 
 const COURIER_STATUSES = ['accepted', 'en_route_to_pickup', 'picked_up', 'in_transit', 'delivered'] as const;
@@ -54,7 +54,7 @@ export async function signUpAction(formData: FormData) {
   const role = String(formData.get('role') || 'shipper') as 'shipper' | 'courier';
   const organization = String(formData.get('organization_name') || '');
 
-  const supabase = await createClient();
+  const supabase = await createActionClient();
   const { data, error } = await supabase.auth.signUp({ email, password });
 
   if (error) {
@@ -83,31 +83,34 @@ export async function signUpAction(formData: FormData) {
     redirect(`/signup?error=${encodeURIComponent(profileError.message)}`);
   }
 
+  revalidatePath('/', 'layout');
   redirect(role === 'courier' ? '/courier?notice=Approval pending' : '/shipper');
 }
 
 export async function loginAction(formData: FormData) {
   const email = String(formData.get('email') || '');
   const password = String(formData.get('password') || '');
-  const supabase = await createClient();
+  const supabase = await createActionClient();
 
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
     redirect('/login?error=Invalid login credentials');
   }
 
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect('/login');
+  if (!data.user || !data.session) {
+    redirectWithError('/login', 'Unable to create a login session. Please try again.');
   }
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('role').eq('id', data.user.id).single();
 
-  redirect(getDashboardPath(profile?.role ?? 'shipper'));
+  if (profileError || !profile) {
+    console.error('Profile lookup after login failed:', profileError);
+    redirectWithError('/login', 'Unable to load your profile. Please contact support.');
+  }
+
+  revalidatePath('/', 'layout');
+  redirect(getDashboardPath(profile.role));
 }
 
 function optionalText(value: FormDataEntryValue | null) {
@@ -117,7 +120,7 @@ function optionalText(value: FormDataEntryValue | null) {
 
 export async function createJobAction(formData: FormData) {
   const { user } = await requireRole(['shipper']);
-  const supabase = await createClient();
+  const supabase = await createActionClient();
   const title = String(formData.get('title') || '').trim();
   const pickupAddress = String(formData.get('pickup_address') || '').trim();
   const dropoffAddress = String(formData.get('dropoff_address') || '').trim();
@@ -169,7 +172,7 @@ export async function createJobAction(formData: FormData) {
 
 export async function submitBidAction(formData: FormData) {
   const { user } = await requireRole(['courier']);
-  const supabase = await createClient();
+  const supabase = await createActionClient();
   const note = optionalText(formData.get('note'));
 
   const phiError = validateNoPhiLabels({ 'Bid notes': note });
@@ -197,7 +200,7 @@ export async function submitBidAction(formData: FormData) {
 
 export async function acceptBidAction(formData: FormData) {
   const { user } = await requireRole(['shipper']);
-  const supabase = await createClient();
+  const supabase = await createActionClient();
   const jobId = String(formData.get('job_id') || '');
   const bidId = String(formData.get('bid_id') || '');
 
@@ -292,7 +295,7 @@ export async function acceptBidAction(formData: FormData) {
 
 export async function addShipmentStatusAction(formData: FormData) {
   const { user } = await requireRole(['courier']);
-  const supabase = await createClient();
+  const supabase = await createActionClient();
   const jobId = String(formData.get('job_id') || '');
   const status = String(formData.get('status') || '');
   const note = optionalText(formData.get('note'));
@@ -379,7 +382,7 @@ export async function addShipmentStatusAction(formData: FormData) {
 
 export async function reviewCourierAction(formData: FormData) {
   await requireRole(['admin']);
-  const supabase = await createClient();
+  const supabase = await createActionClient();
   const profileId = String(formData.get('profile_id') || '');
   const decision = String(formData.get('decision') || '');
 
