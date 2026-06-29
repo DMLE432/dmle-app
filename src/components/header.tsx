@@ -1,12 +1,16 @@
 import Link from 'next/link';
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { APP_NAME, roleLabels, UserRole } from '@/lib/constants';
-import { createClient } from '@/lib/supabase/server';
+import { createActionClient } from '@/lib/supabase/server';
 
 export async function Header({ role }: { role?: UserRole }) {
   async function signOut() {
     'use server';
-    const client = await createClient();
+    const client = await createActionClient();
     await client.auth.signOut();
+    revalidatePath('/', 'layout');
+    redirect('/login');
   }
 
   return (

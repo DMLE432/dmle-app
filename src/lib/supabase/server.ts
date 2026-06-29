@@ -1,7 +1,13 @@
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
-export async function createClient() {
+type CookieToSet = {
+  name: string;
+  value: string;
+  options: CookieOptions;
+};
+
+async function createCookieClient(canSetCookies: boolean) {
   const cookieStore = await cookies();
 
   return createServerClient(
@@ -12,12 +18,31 @@ export async function createClient() {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet: { name: string; value: string; options: Record<string, unknown> }[]) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
+        setAll(cookiesToSet: CookieToSet[]) {
+          if (canSetCookies) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+            return;
+          }
+
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // Server Components can read cookies but cannot write refreshed auth cookies.
+          }
         }
       }
     }
   );
+}
+
+export async function createClient() {
+  return createCookieClient(false);
+}
+
+export async function createActionClient() {
+  return createCookieClient(true);
 }
