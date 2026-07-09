@@ -2,13 +2,14 @@ import Link from 'next/link';
 import { Header } from '@/components/header';
 import { Badge, Card } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
-import { acceptBidAction, createJobAction } from '@/lib/actions';
+import { acceptBidAction, createShipmentAction } from '@/lib/actions';
 import { createClient } from '@/lib/supabase/server';
 import { Database } from '@/types/database';
 
 type Bid = Database['public']['Tables']['bids']['Row'];
 type ShipperSearchParams = {
   error?: string | string[];
+  notice?: string | string[];
 };
 
 const NO_PHI_HELPER_TEXT =
@@ -31,6 +32,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
   const supabase = await createClient();
   const params = await searchParams;
   const errorMessage = getErrorMessage(params.error);
+  const noticeMessage = getErrorMessage(params.notice);
 
   const { data: jobs } = await supabase
     .from('jobs')
@@ -43,8 +45,9 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
       <Header role="shipper" />
       <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[1fr_1.15fr]">
         <Card title="Create a shipment request">
-          <form action={createJobAction} className="space-y-3">
+          <form action={createShipmentAction} className="space-y-3">
             {errorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
+            {noticeMessage && <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{noticeMessage}</p>}
             <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{NO_PHI_HELPER_TEXT}</p>
             <input name="title" placeholder="Shipment title (e.g. STAT blood sample to central lab)" required />
             <div className="grid gap-3 md:grid-cols-2">
