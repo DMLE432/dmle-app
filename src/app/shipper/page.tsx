@@ -7,6 +7,8 @@ import { createClient } from '@/lib/supabase/server';
 import { Database } from '@/types/database';
 
 type Bid = Database['public']['Tables']['bids']['Row'];
+type Job = Database['public']['Tables']['jobs']['Row'];
+type ShipperJob = Job & { bids: Bid[] };
 type ShipperSearchParams = {
   error?: string | string[];
   notice?: string | string[];
@@ -34,11 +36,48 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
   const errorMessage = getErrorMessage(params.error);
   const noticeMessage = getErrorMessage(params.notice);
 
-  const { data: jobs } = await supabase
+  const { data: jobRows, error: jobsError } = await supabase
     .from('jobs')
-    .select('*, bids(*)')
+    .select(
+      'id, shipper_id, title, pickup_address, dropoff_address, specimen_type, pickup_at, required_by, temperature_requirements, chain_of_custody_notes, special_instructions, offered_price, notes, status, accepted_bid_id, created_at'
+    )
     .eq('shipper_id', user.id)
     .order('created_at', { ascending: false });
+
+  if (jobsError) {
+    console.error('Shipper jobs query error:', jobsError);
+  }
+
+  const jobs: ShipperJob[] = (jobRows ?? []).map((job) => ({ ...job, bids: [] }));
+  let bidsErrorMessage: string | null = null;
+
+  if (jobs.length > 0) {
+    const { data: bids, error: bidsError } = await supabase
+      .from('bids')
+      .select('id, job_id, courier_id, amount, eta_minutes, note, status, created_at')
+      .in(
+        'job_id',
+        jobs.map((job) => job.id)
+      )
+      .order('created_at', { ascending: false });
+
+    if (bidsError) {
+      console.error('Shipper bids query error:', bidsError);
+      bidsErrorMessage = 'Shipments loaded, but bids could not be loaded. Please refresh or try again.';
+    } else {
+      const bidsByJobId = new Map<string, Bid[]>();
+
+      for (const bid of bids ?? []) {
+        const jobBids = bidsByJobId.get(bid.job_id) ?? [];
+        jobBids.push(bid);
+        bidsByJobId.set(bid.job_id, jobBids);
+      }
+
+      for (const job of jobs) {
+        job.bids = bidsByJobId.get(job.id) ?? [];
+      }
+    }
+  }
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -80,7 +119,9 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
 
         <Card title="Your shipments and bids">
           <div className="space-y-4">
-            {jobs?.length ? (
+            {jobsError && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">Unable to load your shipments. Please refresh or try again.</p>}
+            {bidsErrorMessage && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{bidsErrorMessage}</p>}
+            {jobs.length ? (
               jobs.map((job) => (
                 <article key={job.id} className="rounded-lg border border-slate-200 p-4">
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -127,7 +168,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                 </article>
               ))
             ) : (
-              <p className="text-sm text-slate-500">No shipments posted yet.</p>
+              !jobsError && <p className="text-sm text-slate-500">No shipments posted yet.</p>
             )}
           </div>
         </Card>
