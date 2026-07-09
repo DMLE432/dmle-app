@@ -4,9 +4,15 @@ import { Badge, Card } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { submitBidAction } from '@/lib/actions';
+import type { Database } from '@/types/database';
 
+type Bid = Database['public']['Tables']['bids']['Row'];
+type Job = Database['public']['Tables']['jobs']['Row'];
+type BidJob = Pick<Job, 'id' | 'title' | 'pickup_address' | 'dropoff_address' | 'pickup_at' | 'required_by'>;
+type CourierBid = Bid & { job: BidJob | null };
 type CourierSearchParams = {
   error?: string | string[];
+  notice?: string | string[];
 };
 
 const NO_PHI_HELPER_TEXT =
@@ -20,26 +26,66 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
-function getErrorMessage(error?: string | string[]) {
-  return Array.isArray(error) ? error[0] : error;
+function getMessage(value?: string | string[]) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 export default async function CourierPage({ searchParams }: { searchParams: Promise<CourierSearchParams> }) {
   const { user, profile } = await requireRole(['courier']);
   const supabase = await createClient();
   const params = await searchParams;
-  const errorMessage = getErrorMessage(params.error);
+  const errorMessage = getMessage(params.error);
+  const noticeMessage = getMessage(params.notice);
 
-  const { data: jobs } = await supabase.from('jobs').select('*').eq('status', 'open').order('created_at', { ascending: false });
+  const { data: jobs, error: jobsError } = await supabase
+    .from('jobs')
+    .select(
+      'id, shipper_id, title, pickup_address, dropoff_address, specimen_type, pickup_at, required_by, temperature_requirements, chain_of_custody_notes, special_instructions, offered_price, notes, status, accepted_bid_id, created_at'
+    )
+    .eq('status', 'open')
+    .order('created_at', { ascending: false });
 
-  const { data: myBids } = await supabase
+  if (jobsError) {
+    console.error('Courier open jobs query error:', jobsError);
+  }
+
+  const { data: bidRows, error: bidsError } = await supabase
     .from('bids')
-    .select('*, jobs(title, pickup_address, dropoff_address, pickup_at, required_by)')
+    .select('id, job_id, courier_id, amount, eta_minutes, note, status, created_at')
     .eq('courier_id', user.id)
     .order('created_at', { ascending: false });
 
+  if (bidsError) {
+    console.error('Courier bids query error:', bidsError);
+  }
+
+  const myBids: CourierBid[] = (bidRows ?? []).map((bid) => ({ ...bid, job: null }));
+  let bidJobsErrorMessage: string | null = null;
+
+  if (myBids.length > 0) {
+    const { data: bidJobs, error: bidJobsError } = await supabase
+      .from('jobs')
+      .select('id, title, pickup_address, dropoff_address, pickup_at, required_by')
+      .in(
+        'id',
+        Array.from(new Set(myBids.map((bid) => bid.job_id)))
+      );
+
+    if (bidJobsError) {
+      console.error('Courier bid jobs query error:', bidJobsError);
+      bidJobsErrorMessage = 'Bids loaded, but shipment details could not be loaded. Please refresh or try again.';
+    } else {
+      const jobsById = new Map((bidJobs ?? []).map((job) => [job.id, job]));
+
+      for (const bid of myBids) {
+        bid.job = jobsById.get(bid.job_id) ?? null;
+      }
+    }
+  }
+
   const canBid = profile.courier_status === 'approved';
-  const bidJobIds = new Set(myBids?.map((bid) => bid.job_id) ?? []);
+  const bidJobIds = new Set(myBids.map((bid) => bid.job_id));
+  const openJobs = jobs ?? [];
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -47,13 +93,15 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
       <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[1.2fr_0.8fr]">
         <Card title="Available shipments">
           {errorMessage && <p className="mb-4 rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
+          {noticeMessage && <p className="mb-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{noticeMessage}</p>}
+          {jobsError && <p className="mb-4 rounded-md bg-rose-50 p-3 text-sm text-rose-700">Unable to load open shipments. Please refresh or try again.</p>}
           {!canBid && (
             <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-800">
               Your courier profile is <strong>{profile.courier_status}</strong>. Admin approval is required before bidding.
             </p>
           )}
           <div className="space-y-4">
-            {jobs?.map((job) => {
+            {openJobs.map((job) => {
               const alreadyBid = bidJobIds.has(job.id);
 
               return (
@@ -93,20 +141,24 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                 </article>
               );
             })}
-            {!jobs?.length && <p className="text-sm text-slate-500">No open shipments currently.</p>}
+            {!jobsError && !openJobs.length && <p className="text-sm text-slate-500">No open shipments currently.</p>}
           </div>
         </Card>
 
         <Card title="My bids">
           <div className="space-y-3">
-            {myBids?.length ? (
+            {bidsError && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">Unable to load your bids. Please refresh or try again.</p>}
+            {bidJobsErrorMessage && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{bidJobsErrorMessage}</p>}
+            {myBids.length ? (
               myBids.map((bid) => (
                 <article key={bid.id} className="rounded-lg border border-slate-200 p-3">
-                  <Link href={`/shipments/${bid.job_id}`} className="font-medium text-brand-700 hover:underline">{bid.jobs?.title}</Link>
+                  <Link href={`/shipments/${bid.job_id}`} className="font-medium text-brand-700 hover:underline">
+                    {bid.job?.title ?? 'Shipment details unavailable'}
+                  </Link>
                   <p className="text-sm text-slate-600">{formatMoney(bid.amount)} · ETA {bid.eta_minutes} min</p>
-                  {bid.jobs && (
+                  {bid.job && (
                     <p className="mt-1 text-xs text-slate-500">
-                      {bid.jobs.pickup_address} → {bid.jobs.dropoff_address}
+                      {bid.job.pickup_address} → {bid.job.dropoff_address}
                     </p>
                   )}
                   <div className="mt-2">
@@ -115,7 +167,7 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                 </article>
               ))
             ) : (
-              <p className="text-sm text-slate-500">No bids submitted yet.</p>
+              !bidsError && <p className="text-sm text-slate-500">No bids submitted yet.</p>
             )}
           </div>
         </Card>
