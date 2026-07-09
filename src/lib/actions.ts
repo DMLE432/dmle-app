@@ -4,8 +4,10 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createActionClient } from '@/lib/supabase/server';
 import { getDashboardPath, requireRole } from '@/lib/auth';
+import type { Database } from '@/types/database';
 
 const COURIER_STATUSES = ['accepted', 'en_route_to_pickup', 'picked_up', 'in_transit', 'delivered'] as const;
+type JobInsert = Database['public']['Tables']['jobs']['Insert'];
 const NO_PHI_MESSAGE =
   'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
 const PHI_LABEL_PATTERNS = [
@@ -118,17 +120,54 @@ function optionalText(value: FormDataEntryValue | null) {
   return text || null;
 }
 
-export async function createJobAction(formData: FormData) {
-  const { user } = await requireRole(['shipper']);
+export async function createShipmentAction(formData: FormData) {
   const supabase = await createActionClient();
   const title = String(formData.get('title') || '').trim();
   const pickupAddress = String(formData.get('pickup_address') || '').trim();
   const dropoffAddress = String(formData.get('dropoff_address') || '').trim();
   const specimenType = String(formData.get('specimen_type') || '').trim();
+  const pickupAt = String(formData.get('pickup_at') || '').trim();
+  const requiredBy = String(formData.get('required_by') || '').trim();
+  const offeredPrice = Number(formData.get('offered_price') || 0);
   const temperatureRequirements = optionalText(formData.get('temperature_requirements'));
   const chainOfCustodyNotes = optionalText(formData.get('chain_of_custody_notes'));
   const specialInstructions = optionalText(formData.get('special_instructions'));
   const notes = optionalText(formData.get('notes'));
+
+  const {
+    data: { user },
+    error: userError
+  } = await supabase.auth.getUser();
+
+  if (userError) {
+    console.error('Create shipment user lookup error:', userError);
+  }
+
+  if (!user) {
+    redirect('/login');
+  }
+
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+
+  if (profileError || !profile) {
+    redirectWithLoggedError('/shipper', 'Create shipment profile lookup error:', profileError, 'Unable to verify your shipper profile. Please try again.');
+  }
+
+  if (profile.role !== 'shipper') {
+    redirect('/dashboard');
+  }
+
+  if (!title || !pickupAddress || !dropoffAddress || !specimenType || !pickupAt || !requiredBy) {
+    redirectWithError('/shipper', 'Unable to create shipment. Please complete all required fields.');
+  }
+
+  if (Number.isNaN(Date.parse(pickupAt)) || Number.isNaN(Date.parse(requiredBy))) {
+    redirectWithError('/shipper', 'Unable to create shipment. Please enter valid pickup and delivery dates.');
+  }
+
+  if (!Number.isFinite(offeredPrice) || offeredPrice <= 0) {
+    redirectWithError('/shipper', 'Unable to create shipment. Offered price must be greater than zero.');
+  }
 
   const phiError = validateNoPhiLabels({
     'Shipment title': title,
@@ -145,29 +184,37 @@ export async function createJobAction(formData: FormData) {
     redirectWithError('/shipper', phiError);
   }
 
-  const { error } = await supabase.from('jobs').insert({
+  const shipment: JobInsert = {
     shipper_id: user.id,
     title,
     pickup_address: pickupAddress,
     dropoff_address: dropoffAddress,
     specimen_type: specimenType,
-    pickup_at: String(formData.get('pickup_at') || ''),
-    required_by: String(formData.get('required_by') || ''),
+    pickup_at: pickupAt,
+    required_by: requiredBy,
     temperature_requirements: temperatureRequirements,
     chain_of_custody_notes: chainOfCustodyNotes,
     special_instructions: specialInstructions,
-    offered_price: Number(formData.get('offered_price') || 0),
+    offered_price: offeredPrice,
     notes,
     status: 'open'
-  });
+  };
+
+  const { data: insertedJob, error } = await supabase.from('jobs').insert(shipment).select('id').single();
 
   if (error) {
     redirectWithLoggedError('/shipper', 'Create shipment error:', error, 'Unable to create shipment. Please check the details and try again.');
   }
 
+  if (!insertedJob) {
+    console.error('Create shipment error: insert returned no row');
+    redirectWithError('/shipper', 'Unable to create shipment. Please try again.');
+  }
+
   revalidatePath('/shipper');
   revalidatePath('/courier');
   revalidatePath('/admin');
+  redirect('/shipper?notice=Shipment%20published');
 }
 
 export async function submitBidAction(formData: FormData) {
