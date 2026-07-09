@@ -117,12 +117,12 @@ create policy "Assigned couriers complete jobs" on public.jobs
     )
   );
 
-create policy "Approved couriers read open jobs" on public.jobs
+create policy "Couriers read open jobs" on public.jobs
   for select using (
     status = 'open'
     and exists (
       select 1 from public.profiles p
-      where p.id = auth.uid() and p.role = 'courier' and p.courier_status = 'approved'
+      where p.id = auth.uid() and p.role = 'courier'
     )
   );
 
