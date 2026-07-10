@@ -38,7 +38,7 @@ export type Database = {
           special_instructions: string | null;
           offered_price: number;
           notes: string | null;
-          status: 'open' | 'assigned' | 'completed' | 'cancelled';
+          status: 'open' | 'assigned' | 'picked_up' | 'in_transit' | 'delivered' | 'completed' | 'cancelled';
           accepted_bid_id: string | null;
           created_at: string;
         };
@@ -56,7 +56,7 @@ export type Database = {
           special_instructions?: string | null;
           offered_price: number;
           notes?: string | null;
-          status?: 'open' | 'assigned' | 'completed' | 'cancelled';
+          status?: 'open' | 'assigned' | 'picked_up' | 'in_transit' | 'delivered' | 'completed' | 'cancelled';
           accepted_bid_id?: string | null;
           created_at?: string;
         };
@@ -84,6 +84,9 @@ export type Database = {
           note: string | null;
           proof_url: string | null;
           proof_name: string | null;
+          received_by_name: string | null;
+          delivery_notes: string | null;
+          delivered_at: string | null;
           created_by: string;
           created_at: string;
         };
@@ -94,6 +97,9 @@ export type Database = {
           note?: string | null;
           proof_url?: string | null;
           proof_name?: string | null;
+          received_by_name?: string | null;
+          delivery_notes?: string | null;
+          delivered_at?: string | null;
           created_by: string;
           created_at?: string;
         };

@@ -6,8 +6,21 @@ import { createActionClient } from '@/lib/supabase/server';
 import { getDashboardPath, requireRole } from '@/lib/auth';
 import type { Database } from '@/types/database';
 
-const COURIER_STATUSES = ['accepted', 'en_route_to_pickup', 'picked_up', 'in_transit', 'delivered'] as const;
 type JobInsert = Database['public']['Tables']['jobs']['Insert'];
+type JobStatus = Database['public']['Tables']['jobs']['Row']['status'];
+type CourierExecutionStatus = Extract<JobStatus, 'picked_up' | 'in_transit' | 'delivered'>;
+type AssignedWorkflowStatus = Extract<JobStatus, 'assigned' | 'picked_up' | 'in_transit'>;
+const COURIER_EXECUTION_STATUSES = ['picked_up', 'in_transit', 'delivered'] as const satisfies readonly CourierExecutionStatus[];
+const NEXT_COURIER_STATUS: Record<AssignedWorkflowStatus, CourierExecutionStatus> = {
+  assigned: 'picked_up',
+  picked_up: 'in_transit',
+  in_transit: 'delivered'
+};
+const STATUS_EVENT_NOTES: Record<CourierExecutionStatus, string> = {
+  picked_up: 'Courier marked the shipment picked up.',
+  in_transit: 'Courier marked the shipment in transit.',
+  delivered: 'Courier marked the shipment delivered.'
+};
 const NO_PHI_MESSAGE =
   'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
 const PHI_LABEL_PATTERNS = [
@@ -129,6 +142,14 @@ export async function loginAction(formData: FormData) {
 function optionalText(value: FormDataEntryValue | null) {
   const text = String(value || '').trim();
   return text || null;
+}
+
+function isCourierExecutionStatus(status: string): status is CourierExecutionStatus {
+  return COURIER_EXECUTION_STATUSES.includes(status as CourierExecutionStatus);
+}
+
+function isAssignedWorkflowStatus(status: JobStatus): status is AssignedWorkflowStatus {
+  return status === 'assigned' || status === 'picked_up' || status === 'in_transit';
 }
 
 export async function createShipmentAction(formData: FormData) {
@@ -393,93 +414,118 @@ export async function acceptBidAction(formData: FormData) {
   revalidatePath('/courier');
   revalidatePath('/admin');
   revalidatePath(`/shipments/${jobId}`);
+  redirectWithNotice('/shipper', 'Bid accepted. Shipment assigned.');
 }
 
-export async function addShipmentStatusAction(formData: FormData) {
+export async function updateAssignedJobStatusAction(formData: FormData) {
   const { user } = await requireRole(['courier']);
   const supabase = await createActionClient();
-  const jobId = String(formData.get('job_id') || '');
-  const status = String(formData.get('status') || '');
-  const note = optionalText(formData.get('note'));
-  const proof = formData.get('proof') as File | null;
-  const errorPath = jobId ? `/shipments/${jobId}` : '/courier';
+  const jobId = String(formData.get('job_id') || '').trim();
+  const status = String(formData.get('status') || '').trim();
+  const receivedByName = optionalText(formData.get('received_by_name'));
+  const deliveryNotes = optionalText(formData.get('delivery_notes'));
+  const sourcePath = String(formData.get('source_path') || '/courier');
+  const redirectPath = sourcePath.startsWith('/shipments/') ? sourcePath : '/courier';
+
+  if (!jobId) {
+    redirectWithError(redirectPath, 'Unable to update shipment status. Missing shipment details.');
+  }
+
+  if (!isCourierExecutionStatus(status)) {
+    redirectWithError(redirectPath, 'Unable to update shipment status. Invalid status.');
+  }
 
   const phiError = validateNoPhiLabels({
-    'Delivery note': note,
-    'Proof filename': proof?.name || null
+    'Received by name': receivedByName,
+    'Delivery notes': deliveryNotes
   });
 
   if (phiError) {
-    redirectWithError(errorPath, phiError);
+    redirectWithError(redirectPath, phiError);
   }
 
-  if (!COURIER_STATUSES.includes(status as (typeof COURIER_STATUSES)[number])) {
-    redirectWithError(errorPath, 'Unable to save status update: invalid shipment status.');
+  if (status === 'delivered' && !receivedByName) {
+    redirectWithError(redirectPath, 'Unable to mark delivered. Please enter who received the shipment.');
   }
 
-  const { data: assignedBid, error: assignedBidError } = await supabase
+  const { data: job, error: jobLookupError } = await supabase
     .from('jobs')
-    .select('id, accepted_bid_id, bids!jobs_accepted_bid_id_fkey(courier_id)')
+    .select('id, status, accepted_bid_id')
     .eq('id', jobId)
     .maybeSingle();
 
-  if (assignedBidError) {
-    redirectWithLoggedError(errorPath, 'Shipment assignment lookup error:', assignedBidError, 'Unable to verify shipment assignment. Please try again.');
+  if (jobLookupError) {
+    redirectWithLoggedError(redirectPath, 'Assigned shipment lookup error:', jobLookupError, 'Unable to verify shipment assignment. Please try again.');
   }
 
-  const assignedCourierId = assignedBid?.bids?.[0]?.courier_id;
-
-  if (!assignedBid || assignedCourierId !== user.id) {
-    redirectWithError(errorPath, 'Unable to save status update: this shipment is not assigned to your courier account.');
+  if (!job?.accepted_bid_id) {
+    redirectWithError(redirectPath, 'Unable to update shipment status. This shipment is not assigned to your courier account.');
   }
 
-  let proofUrl: string | null = null;
-  let proofName: string | null = null;
-  if (proof && proof.size > 0) {
-    const extension = proof.name.includes('.') ? proof.name.split('.').pop() : 'bin';
-    const path = `${jobId}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
-    const { error: uploadError } = await supabase.storage.from('shipment-proofs').upload(path, proof, { upsert: false });
-    if (uploadError) {
-      redirectWithLoggedError(errorPath, 'Proof upload error:', uploadError, 'Unable to upload proof of delivery. Please try again with a logistics-safe file.');
-    }
+  const { data: acceptedBid, error: bidLookupError } = await supabase
+    .from('bids')
+    .select('id')
+    .eq('id', job.accepted_bid_id)
+    .eq('courier_id', user.id)
+    .eq('status', 'accepted')
+    .maybeSingle();
 
-    proofUrl = path;
-    proofName = proof.name;
+  if (bidLookupError) {
+    redirectWithLoggedError(redirectPath, 'Accepted bid lookup error:', bidLookupError, 'Unable to verify shipment assignment. Please try again.');
   }
 
-  const { error: statusEventError } = await supabase
-    .from('job_status_events')
-    .insert({ job_id: jobId, status, note, proof_url: proofUrl, proof_name: proofName, created_by: user.id });
+  if (!acceptedBid) {
+    redirectWithError(redirectPath, 'Unable to update shipment status. This shipment is not assigned to your courier account.');
+  }
+
+  if (!isAssignedWorkflowStatus(job.status)) {
+    redirectWithError(redirectPath, 'Unable to update shipment status. This shipment is not ready for that update.');
+  }
+
+  const expectedStatus = NEXT_COURIER_STATUS[job.status];
+  if (status !== expectedStatus) {
+    redirectWithError(redirectPath, 'Unable to update shipment status. Please complete the assigned workflow in order.');
+  }
+
+  const { data: updatedJob, error: updateJobError } = await supabase
+    .from('jobs')
+    .update({ status })
+    .eq('id', jobId)
+    .eq('status', job.status)
+    .select('id')
+    .maybeSingle();
+
+  if (updateJobError) {
+    redirectWithLoggedError(redirectPath, 'Shipment status update error:', updateJobError, 'Unable to update shipment status. Please try again.');
+  }
+
+  if (!updatedJob) {
+    redirectWithError(redirectPath, 'Unable to update shipment status. The shipment status changed while you were working. Please refresh and try again.');
+  }
+
+  const deliveredAt = status === 'delivered' ? new Date().toISOString() : null;
+  const eventNote = status === 'delivered' ? deliveryNotes || STATUS_EVENT_NOTES.delivered : STATUS_EVENT_NOTES[status];
+  const { error: statusEventError } = await supabase.from('job_status_events').insert({
+    job_id: jobId,
+    status,
+    note: eventNote,
+    proof_url: null,
+    proof_name: null,
+    received_by_name: status === 'delivered' ? receivedByName : null,
+    delivery_notes: status === 'delivered' ? deliveryNotes : null,
+    delivered_at: deliveredAt,
+    created_by: user.id
+  });
 
   if (statusEventError) {
-    redirectWithLoggedError(errorPath, 'Shipment status event error:', statusEventError, 'Unable to save status update. Please try again.');
-  }
-
-  if (status === 'delivered') {
-    const { data: completedJob, error: completeJobError } = await supabase.from('jobs').update({ status: 'completed' }).eq('id', jobId).select('id').maybeSingle();
-
-    if (completeJobError) {
-      console.error('Complete shipment error:', completeJobError);
-      revalidatePath(`/shipments/${jobId}`);
-      revalidatePath('/courier');
-      revalidatePath('/shipper');
-      revalidatePath('/admin');
-      redirectWithError(errorPath, 'Status update was saved, but the shipment could not be marked completed. Please contact admin.');
-    }
-
-    if (!completedJob) {
-      revalidatePath(`/shipments/${jobId}`);
-      revalidatePath('/courier');
-      revalidatePath('/shipper');
-      revalidatePath('/admin');
-      redirectWithError(errorPath, 'Status update was saved, but the shipment could not be marked completed. Please contact admin.');
-    }
+    redirectWithLoggedError(redirectPath, 'Shipment status event error:', statusEventError, 'Shipment status changed, but the status history could not be recorded. Please contact admin.');
   }
 
   revalidatePath(`/shipments/${jobId}`);
   revalidatePath('/courier');
   revalidatePath('/shipper');
   revalidatePath('/admin');
+  redirectWithNotice(redirectPath, `Shipment marked ${status.replaceAll('_', ' ')}.`);
 }
 
 export async function reviewCourierAction(formData: FormData) {
