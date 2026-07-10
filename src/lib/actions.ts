@@ -31,9 +31,20 @@ function redirectWithError(path: string, message: string): never {
   redirect(`${path}?error=${encodeURIComponent(message)}`);
 }
 
+function redirectWithNotice(path: string, message: string): never {
+  redirect(`${path}?notice=${encodeURIComponent(message)}`);
+}
+
 function redirectWithLoggedError(path: string, logMessage: string, error: unknown, userMessage: string): never {
   console.error(logMessage, error);
   redirectWithError(path, userMessage);
+}
+
+function isDuplicateBidError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+
+  const maybeError = error as { code?: string; message?: string };
+  return maybeError.code === '23505' || maybeError.message?.includes('bids_job_id_courier_id_key') === true;
 }
 
 function validateNoPhiLabels(fields: Record<string, string | null>) {
@@ -218,31 +229,75 @@ export async function createShipmentAction(formData: FormData) {
 }
 
 export async function submitBidAction(formData: FormData) {
-  const { user } = await requireRole(['courier']);
+  const { user, profile } = await requireRole(['courier']);
   const supabase = await createActionClient();
+  const jobId = String(formData.get('job_id') || '');
+  const amount = Number(formData.get('amount') || 0);
+  const etaMinutes = Number(formData.get('eta_minutes') || 0);
   const note = optionalText(formData.get('note'));
+
+  if (profile.courier_status !== 'approved') {
+    redirectWithError('/courier', 'Admin approval is required before bidding.');
+  }
+
+  if (!jobId) {
+    redirectWithError('/courier', 'Unable to submit bid. Missing shipment details.');
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    redirectWithError('/courier', 'Unable to submit bid. Bid price must be greater than zero.');
+  }
+
+  if (!Number.isFinite(etaMinutes) || etaMinutes <= 0) {
+    redirectWithError('/courier', 'Unable to submit bid. ETA must be greater than zero.');
+  }
 
   const phiError = validateNoPhiLabels({ 'Bid notes': note });
   if (phiError) {
     redirectWithError('/courier', phiError);
   }
 
-  const { error } = await supabase.from('bids').insert({
-    job_id: String(formData.get('job_id') || ''),
+  const { data: existingBid, error: existingBidError } = await supabase
+    .from('bids')
+    .select('id')
+    .eq('job_id', jobId)
+    .eq('courier_id', user.id)
+    .maybeSingle();
+
+  if (existingBidError) {
+    console.error('Existing bid lookup error:', existingBidError);
+  }
+
+  if (existingBid) {
+    redirectWithNotice('/courier', 'You already submitted a bid for this shipment.');
+  }
+
+  const { data: submittedBid, error } = await supabase.from('bids').insert({
+    job_id: jobId,
     courier_id: user.id,
-    amount: Number(formData.get('amount') || 0),
-    eta_minutes: Number(formData.get('eta_minutes') || 0),
+    amount,
+    eta_minutes: etaMinutes,
     note,
     status: 'pending'
-  });
+  }).select('id').single();
 
   if (error) {
+    if (isDuplicateBidError(error)) {
+      redirectWithNotice('/courier', 'You already submitted a bid for this shipment.');
+    }
+
     redirectWithLoggedError('/courier', 'Submit bid error:', error, 'Unable to submit bid. Please check your bid and try again.');
+  }
+
+  if (!submittedBid) {
+    console.error('Submit bid error: insert returned no row');
+    redirectWithError('/courier', 'Unable to submit bid. Please try again.');
   }
 
   revalidatePath('/courier');
   revalidatePath('/shipper');
   revalidatePath('/admin');
+  redirectWithNotice('/courier', 'Bid submitted.');
 }
 
 export async function acceptBidAction(formData: FormData) {
