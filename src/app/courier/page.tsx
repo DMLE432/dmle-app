@@ -4,6 +4,7 @@ import { Badge, Card } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { submitBidAction, updateAssignedJobStatusAction } from '@/lib/actions';
+import { formatStatusLabel, getStatusTone, isCompletedShipmentStatus } from '@/lib/status';
 import type { Database } from '@/types/database';
 
 type Bid = Database['public']['Tables']['bids']['Row'];
@@ -13,7 +14,6 @@ type StatusEvent = Database['public']['Tables']['job_status_events']['Row'];
 type BidJob = Pick<Job, 'id' | 'title' | 'pickup_address' | 'dropoff_address' | 'pickup_at' | 'required_by'>;
 type CourierBid = Bid & { job: BidJob | null };
 type AssignedJob = Job & { acceptedBid: Bid; events: StatusEvent[] };
-type BadgeTone = 'slate' | 'green' | 'amber' | 'red';
 type CourierExecutionStatus = Extract<JobStatus, 'picked_up' | 'in_transit' | 'delivered'>;
 type CourierSearchParams = {
   error?: string | string[];
@@ -22,6 +22,7 @@ type CourierSearchParams = {
 
 const NO_PHI_HELPER_TEXT =
   'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
+const STATUS_NO_PHI_HELPER_TEXT = `Status updates must stay logistics-only. ${NO_PHI_HELPER_TEXT}`;
 const ASSIGNED_JOB_STATUSES: JobStatus[] = ['assigned', 'picked_up', 'in_transit', 'delivered', 'completed'];
 const STATUS_ACTIONS: Array<{ status: CourierExecutionStatus; currentStatus: JobStatus; label: string }> = [
   { status: 'picked_up', currentStatus: 'assigned', label: 'Mark picked up' },
@@ -37,17 +38,6 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
-function formatStatus(status: string) {
-  return status.replaceAll('_', ' ');
-}
-
-function getStatusTone(status: JobStatus | Bid['status']): BadgeTone {
-  if (status === 'open' || status === 'accepted' || status === 'delivered' || status === 'completed') return 'green';
-  if (status === 'pending' || status === 'assigned' || status === 'picked_up' || status === 'in_transit') return 'amber';
-  if (status === 'declined' || status === 'cancelled') return 'red';
-  return 'slate';
-}
-
 function getMessage(value?: string | string[]) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -60,7 +50,7 @@ function StatusHistory({ events }: { events: StatusEvent[] }) {
         events.map((event) => (
           <article key={event.id} className="rounded-md bg-slate-50 p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="font-medium text-slate-900">{formatStatus(event.status)}</p>
+              <p className="font-medium text-slate-900">{formatStatusLabel(event.status)}</p>
               <p className="text-xs text-slate-500">{formatDateTime(event.created_at)}</p>
             </div>
             {event.note && <p className="mt-1 text-slate-700">{event.note}</p>}
@@ -70,59 +60,51 @@ function StatusHistory({ events }: { events: StatusEvent[] }) {
           </article>
         ))
       ) : (
-        <p className="text-sm text-slate-500">No status updates yet.</p>
+        <p className="text-sm text-slate-500">No status updates have been recorded for this shipment yet.</p>
       )}
     </div>
   );
 }
 
 function AssignedJobActions({ job }: { job: AssignedJob }) {
-  const delivered = job.status === 'delivered' || job.status === 'completed';
-
-  if (delivered) {
-    return <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery workflow complete.</p>;
+  if (isCompletedShipmentStatus(job.status)) {
+    return <p className="mt-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery complete. This shipment is read-only.</p>;
   }
+
+  const nextAction = STATUS_ACTIONS.find((action) => action.currentStatus === job.status);
 
   return (
     <div className="mt-4 space-y-3">
-      <div className="flex flex-wrap gap-2">
-        {STATUS_ACTIONS.slice(0, 2).map((action) => {
-          const enabled = job.status === action.currentStatus;
+      <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{STATUS_NO_PHI_HELPER_TEXT}</p>
 
-          return (
-            <form key={action.status} action={updateAssignedJobStatusAction}>
-              <input type="hidden" name="job_id" value={job.id} />
-              <input type="hidden" name="status" value={action.status} />
-              <input type="hidden" name="source_path" value="/courier" />
-              <button
-                type="submit"
-                disabled={!enabled}
-                className="bg-brand-500 text-white hover:bg-brand-700 disabled:bg-slate-300 disabled:text-slate-500"
-              >
-                {action.label}
-              </button>
-            </form>
-          );
-        })}
-        {job.status !== 'in_transit' && (
-          <button type="button" disabled className="bg-slate-300 text-slate-500">
-            Mark delivered
-          </button>
-        )}
-      </div>
-
-      {job.status === 'in_transit' && (
+      {job.status === 'in_transit' ? (
         <form action={updateAssignedJobStatusAction} className="space-y-2 rounded-md bg-slate-50 p-3">
           <input type="hidden" name="job_id" value={job.id} />
           <input type="hidden" name="status" value="delivered" />
           <input type="hidden" name="source_path" value="/courier" />
-          <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{NO_PHI_HELPER_TEXT}</p>
-          <input name="received_by_name" placeholder="Received by name" required />
-          <textarea name="delivery_notes" placeholder="Delivery notes" rows={3} />
+          <label className="block text-sm font-medium text-slate-700">
+            Received by name
+            <input name="received_by_name" placeholder="Receiving staff or desk name" className="mt-1" required />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            Delivery notes
+            <textarea name="delivery_notes" placeholder="Logistics-safe delivery notes" className="mt-1" rows={3} />
+          </label>
           <button type="submit" className="bg-emerald-600 text-white hover:bg-emerald-700">
             Mark delivered
           </button>
         </form>
+      ) : nextAction ? (
+        <form action={updateAssignedJobStatusAction}>
+          <input type="hidden" name="job_id" value={job.id} />
+          <input type="hidden" name="status" value={nextAction.status} />
+          <input type="hidden" name="source_path" value="/courier" />
+          <button type="submit" className="bg-brand-500 text-white hover:bg-brand-700">
+            {nextAction.label}
+          </button>
+        </form>
+      ) : (
+        <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">No courier action is available for this status.</p>
       )}
     </div>
   );
@@ -248,7 +230,7 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
         {noticeMessage && <p className="mb-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{noticeMessage}</p>}
 
         <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <Card title="Available shipments">
+          <Card title="Open shipments">
             {jobsError && <p className="mb-4 rounded-md bg-rose-50 p-3 text-sm text-rose-700">Unable to load open shipments. Please refresh or try again.</p>}
             {!canBid && (
               <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-800">
@@ -268,7 +250,7 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                         </Link>
                         <p className="text-xs text-slate-500">Offered price: {formatMoney(job.offered_price)}</p>
                       </div>
-                      <Badge tone="green">open</Badge>
+                      <Badge tone={getStatusTone(job.status)}>{formatStatusLabel(job.status)}</Badge>
                     </div>
                     <div className="space-y-1 text-sm text-slate-600">
                       <p>{job.pickup_address} -&gt; {job.dropoff_address}</p>
@@ -281,16 +263,18 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
 
                     {alreadyBid ? (
                       <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">You already submitted a bid for this shipment.</p>
+                    ) : !canBid ? (
+                      <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">Bid actions unlock after admin approval.</p>
                     ) : (
                       <form action={submitBidAction} className="grid gap-2 rounded-md bg-slate-50 p-3 md:grid-cols-3">
                         <input type="hidden" name="job_id" value={job.id} />
-                        <input type="number" min="1" step="0.01" name="amount" placeholder="Bid price ($)" required disabled={!canBid} />
-                        <input type="number" min="1" step="1" name="eta_minutes" placeholder="ETA (min)" required disabled={!canBid} />
+                        <input type="number" min="1" step="0.01" name="amount" placeholder="Bid price ($)" required />
+                        <input type="number" min="1" step="1" name="eta_minutes" placeholder="ETA (min)" required />
                         <div className="md:col-span-3">
                           <p className="mb-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800">{NO_PHI_HELPER_TEXT}</p>
-                          <input name="note" placeholder="Bid notes" disabled={!canBid} />
+                          <input name="note" placeholder="Bid notes" />
                         </div>
-                        <button type="submit" disabled={!canBid} className="bg-brand-500 text-white hover:bg-brand-700 disabled:bg-slate-300">
+                        <button type="submit" className="bg-brand-500 text-white hover:bg-brand-700">
                           Submit bid
                         </button>
                       </form>
@@ -298,12 +282,12 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                   </article>
                 );
               })}
-              {!jobsError && !openJobs.length && <p className="text-sm text-slate-500">No open shipments currently.</p>}
+              {!jobsError && !openJobs.length && <p className="text-sm text-slate-500">No open shipments are available right now. New shipper requests will appear here.</p>}
             </div>
           </Card>
 
           <div className="space-y-6">
-            <Card title="Assigned shipments">
+            <Card title="Assigned work">
               <div className="space-y-4">
                 {assignedJobsErrorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{assignedJobsErrorMessage}</p>}
                 {assignedEventsErrorMessage && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{assignedEventsErrorMessage}</p>}
@@ -315,9 +299,9 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                           <Link href={`/shipments/${job.id}`} className="font-medium text-brand-700 hover:underline">
                             {job.title}
                           </Link>
-                          <p className="text-xs text-slate-500">Accepted bid: {formatMoney(job.acceptedBid.amount)}</p>
+                          <p className="text-xs text-slate-500">Accepted bid amount: {formatMoney(job.acceptedBid.amount)}</p>
                         </div>
-                        <Badge tone={getStatusTone(job.status)}>{formatStatus(job.status)}</Badge>
+                        <Badge tone={getStatusTone(job.status)}>{formatStatusLabel(job.status)}</Badge>
                       </div>
                       <div className="mt-3 space-y-1 text-sm text-slate-600">
                         <p>{job.pickup_address} -&gt; {job.dropoff_address}</p>
@@ -332,7 +316,9 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                     </article>
                   ))
                 ) : (
-                  !assignedJobsErrorMessage && <p className="text-sm text-slate-500">No assigned shipments yet.</p>
+                  !assignedJobsErrorMessage && (
+                    <p className="text-sm text-slate-500">No assigned shipments yet. Accepted bids will appear here for pickup and delivery updates.</p>
+                  )
                 )}
               </div>
             </Card>
@@ -354,12 +340,12 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                         </p>
                       )}
                       <div className="mt-2">
-                        <Badge tone={getStatusTone(bid.status)}>{bid.status}</Badge>
+                        <Badge tone={getStatusTone(bid.status)}>{formatStatusLabel(bid.status)}</Badge>
                       </div>
                     </article>
                   ))
                 ) : (
-                  !bidsError && <p className="text-sm text-slate-500">No bids submitted yet.</p>
+                  !bidsError && <p className="text-sm text-slate-500">No bids submitted yet. Submit a bid on an open shipment to track it here.</p>
                 )}
               </div>
             </Card>

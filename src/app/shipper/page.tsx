@@ -3,6 +3,7 @@ import { Header } from '@/components/header';
 import { Badge, Card } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { acceptBidAction, createShipmentAction } from '@/lib/actions';
+import { formatStatusLabel, getStatusTone, isCompletedShipmentStatus } from '@/lib/status';
 import { createClient } from '@/lib/supabase/server';
 import { Database } from '@/types/database';
 
@@ -10,7 +11,6 @@ type Bid = Database['public']['Tables']['bids']['Row'];
 type Job = Database['public']['Tables']['jobs']['Row'];
 type StatusEvent = Database['public']['Tables']['job_status_events']['Row'];
 type ShipperJob = Job & { bids: Bid[]; events: StatusEvent[] };
-type BadgeTone = 'slate' | 'green' | 'amber' | 'red';
 type ShipperSearchParams = {
   error?: string | string[];
   notice?: string | string[];
@@ -25,17 +25,6 @@ function formatDateTime(value: string) {
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
-}
-
-function formatStatus(status: string) {
-  return status.replaceAll('_', ' ');
-}
-
-function getStatusTone(status: Job['status'] | Bid['status']): BadgeTone {
-  if (status === 'open' || status === 'accepted' || status === 'delivered' || status === 'completed') return 'green';
-  if (status === 'pending' || status === 'assigned' || status === 'picked_up' || status === 'in_transit') return 'amber';
-  if (status === 'declined' || status === 'cancelled') return 'red';
-  return 'slate';
 }
 
 function getErrorMessage(error?: string | string[]) {
@@ -123,7 +112,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
     <main className="min-h-screen bg-slate-50">
       <Header role="shipper" />
       <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[1fr_1.15fr]">
-        <Card title="Create a shipment request">
+        <Card title="Post a shipment">
           <form action={createShipmentAction} className="space-y-3">
             {errorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
             {noticeMessage && <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{noticeMessage}</p>}
@@ -147,7 +136,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
               <input name="specimen_type" placeholder="Package/specimen type" required />
               <input type="number" min="1" step="0.01" name="offered_price" placeholder="Offered price ($)" required />
             </div>
-            <input name="temperature_requirements" placeholder="Temperature requirements (e.g. 2-8°C, frozen, ambient)" />
+            <input name="temperature_requirements" placeholder="Temperature requirements (e.g. 2-8 C, frozen, ambient)" />
             <textarea name="chain_of_custody_notes" placeholder="Chain-of-custody notes" rows={3} />
             <textarea name="special_instructions" placeholder="Special instructions" rows={3} />
             <textarea name="notes" placeholder="Internal notes (optional)" rows={2} />
@@ -157,7 +146,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
           </form>
         </Card>
 
-        <Card title="Your shipments and bids">
+        <Card title="Shipments, bids, and status">
           <div className="space-y-4">
             {jobsError && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">Unable to load your shipments. Please refresh or try again.</p>}
             {bidsErrorMessage && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{bidsErrorMessage}</p>}
@@ -170,16 +159,20 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                       <Link href={`/shipments/${job.id}`} className="font-medium text-brand-700 hover:underline">{job.title}</Link>
                       <p className="text-xs text-slate-500">Offered price: {formatMoney(job.offered_price)}</p>
                     </div>
-                    <Badge tone={getStatusTone(job.status)}>{formatStatus(job.status)}</Badge>
+                    <Badge tone={getStatusTone(job.status)}>{formatStatusLabel(job.status)}</Badge>
                   </div>
                   <div className="space-y-1 text-sm text-slate-600">
-                    <p>{job.pickup_address} → {job.dropoff_address}</p>
-                    <p>Pickup: {formatDateTime(job.pickup_at)} · Deadline: {formatDateTime(job.required_by)}</p>
+                    <p>{job.pickup_address} -&gt; {job.dropoff_address}</p>
+                    <p>Pickup: {formatDateTime(job.pickup_at)} - Deadline: {formatDateTime(job.required_by)}</p>
                     <p>Specimen/package: {job.specimen_type}</p>
                     {job.temperature_requirements && <p>Temperature: {job.temperature_requirements}</p>}
                     {job.chain_of_custody_notes && <p>Chain-of-custody: {job.chain_of_custody_notes}</p>}
                     {job.special_instructions && <p>Special instructions: {job.special_instructions}</p>}
                   </div>
+
+                  {isCompletedShipmentStatus(job.status) && (
+                    <p className="mt-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery complete. This shipment is read-only.</p>
+                  )}
 
                   <div className="mt-4 space-y-2">
                     <p className="text-sm font-semibold text-slate-800">Status history</p>
@@ -187,7 +180,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                       job.events.map((event) => (
                         <article key={event.id} className="rounded-md bg-slate-50 p-3 text-sm">
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="font-medium text-slate-900">{formatStatus(event.status)}</p>
+                            <p className="font-medium text-slate-900">{formatStatusLabel(event.status)}</p>
                             <p className="text-xs text-slate-500">{formatDateTime(event.created_at)}</p>
                           </div>
                           {event.note && <p className="mt-1 text-slate-700">{event.note}</p>}
@@ -197,7 +190,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                         </article>
                       ))
                     ) : (
-                      <p className="text-sm text-slate-500">No status updates yet.</p>
+                      <p className="text-sm text-slate-500">No status updates have been recorded for this shipment yet.</p>
                     )}
                   </div>
 
@@ -207,8 +200,8 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                       job.bids.map((bid: Bid) => (
                         <div key={bid.id} className="rounded-md bg-slate-50 p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-sm font-medium">{formatMoney(bid.amount)} · ETA {bid.eta_minutes} min</p>
-                            <Badge tone={getStatusTone(bid.status)}>{bid.status}</Badge>
+                            <p className="text-sm font-medium">{formatMoney(bid.amount)} - ETA {bid.eta_minutes} min</p>
+                            <Badge tone={getStatusTone(bid.status)}>{formatStatusLabel(bid.status)}</Badge>
                           </div>
                           {bid.note && <p className="mt-1 text-sm text-slate-600">{bid.note}</p>}
                           {job.status === 'open' && bid.status === 'pending' && (
@@ -223,13 +216,13 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                         </div>
                       ))
                     ) : (
-                      <p className="text-sm text-slate-500">No bids received yet.</p>
+                      <p className="text-sm text-slate-500">No bids received yet. Courier bids will appear here when this shipment is open.</p>
                     )}
                   </div>
                 </article>
               ))
             ) : (
-              !jobsError && <p className="text-sm text-slate-500">No shipments posted yet.</p>
+              !jobsError && <p className="text-sm text-slate-500">No shipments posted yet. Publish a shipment to start receiving courier bids.</p>
             )}
           </div>
         </Card>

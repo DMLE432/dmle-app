@@ -3,13 +3,13 @@ import { Header } from '@/components/header';
 import { Badge, Card } from '@/components/ui';
 import { updateAssignedJobStatusAction } from '@/lib/actions';
 import { requireRole } from '@/lib/auth';
+import { formatStatusLabel, getStatusTone, isCompletedShipmentStatus } from '@/lib/status';
 import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 
 type Job = Database['public']['Tables']['jobs']['Row'];
 type JobStatus = Job['status'];
 type StatusEvent = Database['public']['Tables']['job_status_events']['Row'];
-type BadgeTone = 'slate' | 'green' | 'amber' | 'red';
 type CourierExecutionStatus = Extract<JobStatus, 'picked_up' | 'in_transit' | 'delivered'>;
 type ShipmentSearchParams = {
   error?: string | string[];
@@ -18,6 +18,7 @@ type ShipmentSearchParams = {
 
 const NO_PHI_HELPER_TEXT =
   'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
+const STATUS_NO_PHI_HELPER_TEXT = `Status updates must stay logistics-only. ${NO_PHI_HELPER_TEXT}`;
 const STATUS_ACTIONS: Array<{ status: CourierExecutionStatus; currentStatus: JobStatus; label: string }> = [
   { status: 'picked_up', currentStatus: 'assigned', label: 'Mark picked up' },
   { status: 'in_transit', currentStatus: 'picked_up', label: 'Mark in transit' },
@@ -27,68 +28,49 @@ const STATUS_ACTIONS: Array<{ status: CourierExecutionStatus; currentStatus: Job
 const formatDateTime = (value: string) => new Date(value).toLocaleString();
 const formatMoney = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 
-function formatStatus(status: string) {
-  return status.replaceAll('_', ' ');
-}
-
-function getStatusTone(status: JobStatus): BadgeTone {
-  if (status === 'open' || status === 'delivered' || status === 'completed') return 'green';
-  if (status === 'assigned' || status === 'picked_up' || status === 'in_transit') return 'amber';
-  if (status === 'cancelled') return 'red';
-  return 'slate';
-}
-
 function getMessage(value?: string | string[]) {
   return Array.isArray(value) ? value[0] : value;
 }
 
 function StatusActions({ job }: { job: Job }) {
-  const delivered = job.status === 'delivered' || job.status === 'completed';
-
-  if (delivered) {
-    return <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery workflow complete.</p>;
+  if (isCompletedShipmentStatus(job.status)) {
+    return <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery complete. This shipment is read-only.</p>;
   }
+
+  const nextAction = STATUS_ACTIONS.find((action) => action.currentStatus === job.status);
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        {STATUS_ACTIONS.slice(0, 2).map((action) => {
-          const enabled = job.status === action.currentStatus;
+      <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{STATUS_NO_PHI_HELPER_TEXT}</p>
 
-          return (
-            <form key={action.status} action={updateAssignedJobStatusAction}>
-              <input type="hidden" name="job_id" value={job.id} />
-              <input type="hidden" name="status" value={action.status} />
-              <input type="hidden" name="source_path" value={`/shipments/${job.id}`} />
-              <button
-                type="submit"
-                disabled={!enabled}
-                className="bg-brand-500 text-white hover:bg-brand-700 disabled:bg-slate-300 disabled:text-slate-500"
-              >
-                {action.label}
-              </button>
-            </form>
-          );
-        })}
-        {job.status !== 'in_transit' && (
-          <button type="button" disabled className="bg-slate-300 text-slate-500">
-            Mark delivered
-          </button>
-        )}
-      </div>
-
-      {job.status === 'in_transit' && (
+      {job.status === 'in_transit' ? (
         <form action={updateAssignedJobStatusAction} className="space-y-2 rounded-md bg-slate-50 p-3">
           <input type="hidden" name="job_id" value={job.id} />
           <input type="hidden" name="status" value="delivered" />
           <input type="hidden" name="source_path" value={`/shipments/${job.id}`} />
-          <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{NO_PHI_HELPER_TEXT}</p>
-          <input name="received_by_name" placeholder="Received by name" required />
-          <textarea name="delivery_notes" rows={3} placeholder="Delivery notes" />
+          <label className="block text-sm font-medium text-slate-700">
+            Received by name
+            <input name="received_by_name" placeholder="Receiving staff or desk name" className="mt-1" required />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            Delivery notes
+            <textarea name="delivery_notes" rows={3} placeholder="Logistics-safe delivery notes" className="mt-1" />
+          </label>
           <button type="submit" className="w-fit bg-emerald-600 text-white hover:bg-emerald-700">
             Mark delivered
           </button>
         </form>
+      ) : nextAction ? (
+        <form action={updateAssignedJobStatusAction}>
+          <input type="hidden" name="job_id" value={job.id} />
+          <input type="hidden" name="status" value={nextAction.status} />
+          <input type="hidden" name="source_path" value={`/shipments/${job.id}`} />
+          <button type="submit" className="bg-brand-500 text-white hover:bg-brand-700">
+            {nextAction.label}
+          </button>
+        </form>
+      ) : (
+        <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">No courier action is available for this status.</p>
       )}
     </div>
   );
@@ -137,7 +119,8 @@ export default async function ShipmentDetailPage({
     console.error('Shipment status events query error:', eventsError);
   }
 
-  const canUpdateStatus = profile.role === 'courier' && acceptedCourierId === user.id;
+  const isAssignedCourier = profile.role === 'courier' && acceptedCourierId === user.id;
+  const canUpdateStatus = isAssignedCourier && !isCompletedShipmentStatus(job.status);
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -145,7 +128,7 @@ export default async function ShipmentDetailPage({
       <div className="mx-auto max-w-5xl space-y-6 px-6 py-8">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold text-slate-900">Shipment details</h1>
-          <Badge tone={getStatusTone(job.status)}>{formatStatus(job.status)}</Badge>
+          <Badge tone={getStatusTone(job.status)}>{formatStatusLabel(job.status)}</Badge>
         </div>
         {errorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
         {noticeMessage && <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{noticeMessage}</p>}
@@ -166,9 +149,13 @@ export default async function ShipmentDetailPage({
           </div>
         </Card>
 
-        {canUpdateStatus && (
-          <Card title="Courier status update">
-            <StatusActions job={job} />
+        {isAssignedCourier && (
+          <Card title={canUpdateStatus ? 'Courier status update' : 'Courier status'}>
+            {canUpdateStatus ? (
+              <StatusActions job={job} />
+            ) : (
+              <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery complete. This shipment is read-only.</p>
+            )}
           </Card>
         )}
 
@@ -178,7 +165,7 @@ export default async function ShipmentDetailPage({
               events.map((event: StatusEvent) => (
                 <article key={event.id} className="rounded-md border border-slate-200 p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-medium text-slate-900">{formatStatus(event.status)}</p>
+                    <p className="font-medium text-slate-900">{formatStatusLabel(event.status)}</p>
                     <p className="text-xs text-slate-500">{formatDateTime(event.created_at)}</p>
                   </div>
                   {event.note && <p className="mt-1 text-slate-700">{event.note}</p>}
@@ -188,7 +175,7 @@ export default async function ShipmentDetailPage({
                 </article>
               ))
             ) : (
-              !eventsError && <p className="text-sm text-slate-500">No status updates yet.</p>
+              !eventsError && <p className="text-sm text-slate-500">No status updates have been recorded for this shipment yet.</p>
             )}
           </div>
         </Card>

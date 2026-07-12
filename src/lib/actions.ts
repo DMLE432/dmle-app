@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createActionClient } from '@/lib/supabase/server';
 import { getDashboardPath, requireRole } from '@/lib/auth';
+import { formatStatusLabel } from '@/lib/status';
 import type { Database } from '@/types/database';
 
 type JobInsert = Database['public']['Tables']['jobs']['Insert'];
@@ -246,7 +247,7 @@ export async function createShipmentAction(formData: FormData) {
   revalidatePath('/shipper');
   revalidatePath('/courier');
   revalidatePath('/admin');
-  redirect('/shipper?notice=Shipment%20published');
+  redirectWithNotice('/shipper', 'Shipment published. Couriers can now submit bids.');
 }
 
 export async function submitBidAction(formData: FormData) {
@@ -290,7 +291,7 @@ export async function submitBidAction(formData: FormData) {
   }
 
   if (existingBid) {
-    redirectWithNotice('/courier', 'You already submitted a bid for this shipment.');
+    redirectWithNotice('/courier', 'You already submitted a bid for this shipment. Track it under My bids.');
   }
 
   const { data: submittedBid, error } = await supabase.from('bids').insert({
@@ -304,7 +305,7 @@ export async function submitBidAction(formData: FormData) {
 
   if (error) {
     if (isDuplicateBidError(error)) {
-      redirectWithNotice('/courier', 'You already submitted a bid for this shipment.');
+      redirectWithNotice('/courier', 'You already submitted a bid for this shipment. Track it under My bids.');
     }
 
     redirectWithLoggedError('/courier', 'Submit bid error:', error, 'Unable to submit bid. Please check your bid and try again.');
@@ -318,7 +319,7 @@ export async function submitBidAction(formData: FormData) {
   revalidatePath('/courier');
   revalidatePath('/shipper');
   revalidatePath('/admin');
-  redirectWithNotice('/courier', 'Bid submitted.');
+  redirectWithNotice('/courier', 'Bid submitted. Track it under My bids.');
 }
 
 export async function acceptBidAction(formData: FormData) {
@@ -414,7 +415,7 @@ export async function acceptBidAction(formData: FormData) {
   revalidatePath('/courier');
   revalidatePath('/admin');
   revalidatePath(`/shipments/${jobId}`);
-  redirectWithNotice('/shipper', 'Bid accepted. Shipment assigned.');
+  redirectWithNotice('/shipper', 'Bid accepted. Shipment assigned to the courier.');
 }
 
 export async function updateAssignedJobStatusAction(formData: FormData) {
@@ -445,7 +446,7 @@ export async function updateAssignedJobStatusAction(formData: FormData) {
   }
 
   if (status === 'delivered' && !receivedByName) {
-    redirectWithError(redirectPath, 'Unable to mark delivered. Please enter who received the shipment.');
+    redirectWithError(redirectPath, 'Unable to mark delivered. Please enter the logistics-safe name of the receiving person or desk.');
   }
 
   const { data: job, error: jobLookupError } = await supabase
@@ -525,7 +526,7 @@ export async function updateAssignedJobStatusAction(formData: FormData) {
   revalidatePath('/courier');
   revalidatePath('/shipper');
   revalidatePath('/admin');
-  redirectWithNotice(redirectPath, `Shipment marked ${status.replaceAll('_', ' ')}.`);
+  redirectWithNotice(redirectPath, `Status updated: shipment marked ${formatStatusLabel(status).toLowerCase()}.`);
 }
 
 export async function reviewCourierAction(formData: FormData) {
