@@ -4,6 +4,7 @@ import { Badge, Card } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { reviewCourierAction } from '@/lib/actions';
+import { formatStatusLabel, getStatusTone } from '@/lib/status';
 
 type AdminSearchParams = {
   error?: string | string[];
@@ -84,7 +85,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                 <article key={job.id} className="rounded-lg border border-slate-200 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <Link href={`/shipments/${job.id}`} className="font-medium text-brand-700 hover:underline">{job.title}</Link>
-                    <Badge tone={job.status === 'open' ? 'green' : 'slate'}>{job.status}</Badge>
+                    <Badge tone={getStatusTone(job.status)}>{formatStatusLabel(job.status)}</Badge>
                   </div>
                   <p className="text-sm text-slate-600">By {job.profiles?.organization_name || job.profiles?.full_name || 'Unknown shipper'}</p>
                   <p className="text-xs text-slate-500">{job.pickup_address} → {job.dropoff_address}</p>
@@ -105,7 +106,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                 <article key={bid.id} className="rounded-lg border border-slate-200 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-medium">{bid.jobs?.title || 'Shipment'}</p>
-                    <Badge tone={bid.status === 'accepted' ? 'green' : bid.status === 'declined' ? 'red' : 'amber'}>{bid.status}</Badge>
+                    <Badge tone={getStatusTone(bid.status)}>{formatStatusLabel(bid.status)}</Badge>
                   </div>
                   <p className="text-sm text-slate-600">
                     Courier: {bid.profiles?.organization_name || bid.profiles?.full_name || 'Unknown courier'}
