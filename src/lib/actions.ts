@@ -539,7 +539,13 @@ export async function reviewCourierAction(formData: FormData) {
     redirectWithError('/admin', 'Unable to update courier review. Missing courier or review decision.');
   }
 
-  const { data: reviewedCourier, error } = await supabase.from('profiles').update({ courier_status: decision }).eq('id', profileId).select('id').maybeSingle();
+  const { data: reviewedCourier, error } = await supabase
+    .from('profiles')
+    .update({ courier_status: decision })
+    .eq('id', profileId)
+    .eq('role', 'courier')
+    .select('id, full_name')
+    .maybeSingle();
 
   if (error) {
     redirectWithLoggedError('/admin', 'Review courier error:', error, 'Unable to update courier review. Please try again.');
@@ -551,4 +557,5 @@ export async function reviewCourierAction(formData: FormData) {
 
   revalidatePath('/admin');
   revalidatePath('/courier');
+  redirectWithNotice('/admin', `Courier ${reviewedCourier.full_name || 'profile'} ${decision}.`);
 }

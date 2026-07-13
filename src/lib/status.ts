@@ -3,6 +3,7 @@ export type StatusTone = 'slate' | 'green' | 'amber' | 'red';
 const STATUS_LABELS: Record<string, string> = {
   accepted: 'Accepted',
   assigned: 'Assigned',
+  approved: 'Approved',
   cancelled: 'Cancelled',
   completed: 'Completed',
   declined: 'Declined',
@@ -10,7 +11,8 @@ const STATUS_LABELS: Record<string, string> = {
   in_transit: 'In transit',
   open: 'Open',
   pending: 'Pending',
-  picked_up: 'Picked up'
+  picked_up: 'Picked up',
+  rejected: 'Rejected'
 };
 
 export function formatStatusLabel(status: string) {
@@ -18,9 +20,9 @@ export function formatStatusLabel(status: string) {
 }
 
 export function getStatusTone(status: string): StatusTone {
-  if (status === 'open' || status === 'accepted' || status === 'delivered' || status === 'completed') return 'green';
+  if (status === 'open' || status === 'accepted' || status === 'approved' || status === 'delivered' || status === 'completed') return 'green';
   if (status === 'pending' || status === 'assigned' || status === 'picked_up' || status === 'in_transit') return 'amber';
-  if (status === 'declined' || status === 'cancelled') return 'red';
+  if (status === 'declined' || status === 'rejected' || status === 'cancelled') return 'red';
   return 'slate';
 }
 
