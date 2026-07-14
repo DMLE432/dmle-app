@@ -1,9 +1,8 @@
 import { Header } from '@/components/header';
-import { Badge, Card } from '@/components/ui';
+import { Card, EmptyState, Notice, StatusBadge } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { reviewCourierAction } from '@/lib/actions';
-import { formatStatusLabel, getStatusTone } from '@/lib/status';
 import type { Database } from '@/types/database';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
@@ -48,19 +47,23 @@ function normalizeCourierStatus(status: CourierProfile['courier_status']): Couri
 function CourierReviewButtons({ courier }: { courier: CourierProfile }) {
   const status = normalizeCourierStatus(courier.courier_status);
 
+  if (status !== 'pending') {
+    return (
+      <Notice tone="neutral" className="mt-4">
+        Review complete. No approval action is currently available.
+      </Notice>
+    );
+  }
+
   return (
     <form action={reviewCourierAction} className="mt-4 flex flex-wrap gap-2">
       <input type="hidden" name="profile_id" value={courier.id} />
-      {status !== 'approved' && (
-        <button name="decision" value="approved" className="bg-emerald-600 text-white hover:bg-emerald-700">
-          Approve courier
-        </button>
-      )}
-      {status !== 'rejected' && (
-        <button name="decision" value="rejected" className="bg-rose-600 text-white hover:bg-rose-700">
-          Reject courier
-        </button>
-      )}
+      <button name="decision" value="approved" className="bg-emerald-600 text-white hover:bg-emerald-700">
+        Approve courier
+      </button>
+      <button name="decision" value="rejected" className="bg-rose-600 text-white hover:bg-rose-700">
+        Reject courier
+      </button>
     </form>
   );
 }
@@ -75,7 +78,7 @@ function CourierCard({ courier }: { courier: CourierProfile }) {
           <p className="font-medium text-slate-900">{courier.full_name || 'Courier profile'}</p>
           <p className="text-sm text-slate-600">{courier.organization_name || 'Independent courier'}</p>
         </div>
-        <Badge tone={getStatusTone(status)}>{formatStatusLabel(status)}</Badge>
+        <StatusBadge status={status} />
       </div>
       <p className="mt-2 text-xs text-slate-500">Signed up {formatDateTime(courier.created_at)}</p>
       <CourierReviewButtons courier={courier} />
@@ -118,18 +121,14 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <p className="mt-1 text-sm text-slate-600">Review courier accounts and manage access to shipment bidding.</p>
         </div>
 
-        {errorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
-        {noticeMessage && <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{noticeMessage}</p>}
-        {couriersError && (
-          <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">
-            Courier profiles could not be loaded. Please refresh or try again.
-          </p>
-        )}
+        {errorMessage && <Notice tone="error">{errorMessage}</Notice>}
+        {noticeMessage && <Notice tone="success">{noticeMessage}</Notice>}
+        {couriersError && <Notice tone="error">Courier profiles could not be loaded. Please refresh or try again.</Notice>}
 
-        <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">
+        <Notice tone="warning">
           Courier approval uses account profile metadata only. Do not enter patient names, DOB, MRN, diagnosis, test results, insurance
           information, or specimen identifiers.
-        </p>
+        </Notice>
 
         <div className="grid gap-6 lg:grid-cols-3">
           {COURIER_GROUPS.map((group) => {
@@ -141,7 +140,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                   {groupCouriers.length ? (
                     groupCouriers.map((courier) => <CourierCard key={courier.id} courier={courier} />)
                   ) : (
-                    <p className="text-sm text-slate-500">{group.empty}</p>
+                    <EmptyState>{group.empty}</EmptyState>
                   )}
                 </div>
               </Card>

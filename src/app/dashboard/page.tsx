@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { getDashboardPath, getUserWithProfile } from '@/lib/auth';
+import { getDashboardRedirectPath, getUserWithProfile } from '@/lib/auth';
 
 export default async function DashboardRedirectPage() {
   const { user, profile } = await getUserWithProfile();
@@ -8,5 +8,5 @@ export default async function DashboardRedirectPage() {
     redirect('/login');
   }
 
-  redirect(getDashboardPath(profile.role));
+  redirect(getDashboardRedirectPath(profile));
 }

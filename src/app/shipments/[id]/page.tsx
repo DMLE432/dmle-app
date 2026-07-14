@@ -1,9 +1,9 @@
 import { notFound } from 'next/navigation';
 import { Header } from '@/components/header';
-import { Badge, Card } from '@/components/ui';
+import { Card, EmptyState, Notice, StatusBadge } from '@/components/ui';
 import { updateAssignedJobStatusAction } from '@/lib/actions';
 import { requireRole } from '@/lib/auth';
-import { formatStatusLabel, getStatusTone, isCompletedShipmentStatus } from '@/lib/status';
+import { isCompletedShipmentStatus } from '@/lib/status';
 import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 
@@ -34,14 +34,14 @@ function getMessage(value?: string | string[]) {
 
 function StatusActions({ job }: { job: Job }) {
   if (isCompletedShipmentStatus(job.status)) {
-    return <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery complete. This shipment is read-only.</p>;
+    return <Notice tone="success">Delivery complete. This shipment is read-only and no more courier actions are available.</Notice>;
   }
 
   const nextAction = STATUS_ACTIONS.find((action) => action.currentStatus === job.status);
 
   return (
     <div className="space-y-3">
-      <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{STATUS_NO_PHI_HELPER_TEXT}</p>
+      <Notice tone="warning">{STATUS_NO_PHI_HELPER_TEXT}</Notice>
 
       {job.status === 'in_transit' ? (
         <form action={updateAssignedJobStatusAction} className="space-y-2 rounded-md bg-slate-50 p-3">
@@ -49,7 +49,7 @@ function StatusActions({ job }: { job: Job }) {
           <input type="hidden" name="status" value="delivered" />
           <input type="hidden" name="source_path" value={`/shipments/${job.id}`} />
           <label className="block text-sm font-medium text-slate-700">
-            Received by name
+            Received by (staff or desk)
             <input name="received_by_name" placeholder="Receiving staff or desk name" className="mt-1" required />
           </label>
           <label className="block text-sm font-medium text-slate-700">
@@ -70,7 +70,7 @@ function StatusActions({ job }: { job: Job }) {
           </button>
         </form>
       ) : (
-        <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">No courier action is available for this status.</p>
+        <Notice tone="neutral">No courier action is available for this status.</Notice>
       )}
     </div>
   );
@@ -128,11 +128,11 @@ export default async function ShipmentDetailPage({
       <div className="mx-auto max-w-5xl space-y-6 px-6 py-8">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold text-slate-900">Shipment details</h1>
-          <Badge tone={getStatusTone(job.status)}>{formatStatusLabel(job.status)}</Badge>
+          <StatusBadge status={job.status} />
         </div>
-        {errorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
-        {noticeMessage && <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{noticeMessage}</p>}
-        {eventsError && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">Shipment loaded, but status history could not be loaded. Please refresh or try again.</p>}
+        {errorMessage && <Notice tone="error">{errorMessage}</Notice>}
+        {noticeMessage && <Notice tone="success">{noticeMessage}</Notice>}
+        {eventsError && <Notice tone="warning">Shipment loaded, but status history could not be loaded. Please refresh or try again.</Notice>}
 
         <Card title={job.title}>
           <div className="grid gap-3 text-sm text-slate-700 md:grid-cols-2">
@@ -140,7 +140,7 @@ export default async function ShipmentDetailPage({
             <p><strong>Delivery address:</strong> {job.dropoff_address}</p>
             <p><strong>Pickup time:</strong> {formatDateTime(job.pickup_at)}</p>
             <p><strong>Delivery deadline:</strong> {formatDateTime(job.required_by)}</p>
-            <p><strong>Specimen/package:</strong> {job.specimen_type}</p>
+            <p><strong>Package/item:</strong> {job.specimen_type}</p>
             <p><strong>Temperature requirements:</strong> {job.temperature_requirements || 'N/A'}</p>
             <p><strong>Offered price:</strong> {formatMoney(job.offered_price)}</p>
             <p><strong>Accepted bid:</strong> {acceptedBid?.amount ? formatMoney(acceptedBid.amount) : 'Not accepted yet'}</p>
@@ -154,7 +154,7 @@ export default async function ShipmentDetailPage({
             {canUpdateStatus ? (
               <StatusActions job={job} />
             ) : (
-              <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery complete. This shipment is read-only.</p>
+              <Notice tone="success">Delivery complete. This shipment is read-only and no more courier actions are available.</Notice>
             )}
           </Card>
         )}
@@ -165,7 +165,7 @@ export default async function ShipmentDetailPage({
               events.map((event: StatusEvent) => (
                 <article key={event.id} className="rounded-md border border-slate-200 p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-medium text-slate-900">{formatStatusLabel(event.status)}</p>
+                    <StatusBadge status={event.status} />
                     <p className="text-xs text-slate-500">{formatDateTime(event.created_at)}</p>
                   </div>
                   {event.note && <p className="mt-1 text-slate-700">{event.note}</p>}
@@ -175,7 +175,7 @@ export default async function ShipmentDetailPage({
                 </article>
               ))
             ) : (
-              !eventsError && <p className="text-sm text-slate-500">No status updates have been recorded for this shipment yet.</p>
+              !eventsError && <EmptyState>No status updates have been recorded for this shipment yet.</EmptyState>
             )}
           </div>
         </Card>

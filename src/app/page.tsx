@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { getDashboardPath } from '@/lib/auth';
+import { getDashboardRedirectPath } from '@/lib/auth';
 
 export default async function HomePage() {
   const supabase = await createClient();
@@ -11,9 +11,9 @@ export default async function HomePage() {
   let dashboardHref = '/login';
 
   if (user) {
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('profiles').select('role, courier_status').eq('id', user.id).single();
     if (profile) {
-      dashboardHref = getDashboardPath(profile.role);
+      dashboardHref = getDashboardRedirectPath(profile);
     }
   }
 
@@ -22,7 +22,7 @@ export default async function HomePage() {
       <p className="mb-4 rounded-full bg-brand-50 px-3 py-1 text-sm font-medium text-brand-700">Medical courier marketplace MVP</p>
       <h1 className="mb-4 text-4xl font-bold text-slate-900">Direct Med Logistics Exchange</h1>
       <p className="mb-8 max-w-2xl text-slate-600">
-        Connect shippers and vetted couriers for compliant, time-sensitive medical deliveries.
+        Coordinate logistics-safe shipment requests, courier bids, and delivery status updates for private beta workflows.
       </p>
       <div className="flex gap-3">
         <Link className="rounded-md bg-brand-500 px-5 py-2 text-white hover:bg-brand-700" href={dashboardHref}>

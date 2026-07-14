@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import { Header } from '@/components/header';
-import { Badge, Card } from '@/components/ui';
-import { requireRole } from '@/lib/auth';
+import { Card, EmptyState, Notice, StatusBadge } from '@/components/ui';
+import { getCourierStatusNotice, requireRole } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { submitBidAction, updateAssignedJobStatusAction } from '@/lib/actions';
-import { formatStatusLabel, getStatusTone, isCompletedShipmentStatus } from '@/lib/status';
+import { isCompletedShipmentStatus } from '@/lib/status';
 import type { Database } from '@/types/database';
 
 type Bid = Database['public']['Tables']['bids']['Row'];
@@ -50,7 +50,7 @@ function StatusHistory({ events }: { events: StatusEvent[] }) {
         events.map((event) => (
           <article key={event.id} className="rounded-md bg-slate-50 p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="font-medium text-slate-900">{formatStatusLabel(event.status)}</p>
+              <StatusBadge status={event.status} />
               <p className="text-xs text-slate-500">{formatDateTime(event.created_at)}</p>
             </div>
             {event.note && <p className="mt-1 text-slate-700">{event.note}</p>}
@@ -68,14 +68,14 @@ function StatusHistory({ events }: { events: StatusEvent[] }) {
 
 function AssignedJobActions({ job }: { job: AssignedJob }) {
   if (isCompletedShipmentStatus(job.status)) {
-    return <p className="mt-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery complete. This shipment is read-only.</p>;
+    return <Notice tone="success" className="mt-4">Delivery complete. This shipment is read-only and no more courier actions are available.</Notice>;
   }
 
   const nextAction = STATUS_ACTIONS.find((action) => action.currentStatus === job.status);
 
   return (
     <div className="mt-4 space-y-3">
-      <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{STATUS_NO_PHI_HELPER_TEXT}</p>
+      <Notice tone="warning">{STATUS_NO_PHI_HELPER_TEXT}</Notice>
 
       {job.status === 'in_transit' ? (
         <form action={updateAssignedJobStatusAction} className="space-y-2 rounded-md bg-slate-50 p-3">
@@ -83,7 +83,7 @@ function AssignedJobActions({ job }: { job: AssignedJob }) {
           <input type="hidden" name="status" value="delivered" />
           <input type="hidden" name="source_path" value="/courier" />
           <label className="block text-sm font-medium text-slate-700">
-            Received by name
+            Received by (staff or desk)
             <input name="received_by_name" placeholder="Receiving staff or desk name" className="mt-1" required />
           </label>
           <label className="block text-sm font-medium text-slate-700">
@@ -104,7 +104,7 @@ function AssignedJobActions({ job }: { job: AssignedJob }) {
           </button>
         </form>
       ) : (
-        <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">No courier action is available for this status.</p>
+        <Notice tone="neutral">No courier action is available for this status.</Notice>
       )}
     </div>
   );
@@ -219,6 +219,8 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
   }
 
   const canBid = profile.courier_status === 'approved';
+  const courierStatus = profile.courier_status ?? 'pending';
+  const courierStatusNotice = getCourierStatusNotice(courierStatus);
   const bidJobIds = new Set(myBids.map((bid) => bid.job_id));
   const openJobs = jobs ?? [];
 
@@ -226,16 +228,16 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
     <main className="min-h-screen bg-slate-50">
       <Header role="courier" />
       <div className="mx-auto max-w-6xl px-6 py-8">
-        {errorMessage && <p className="mb-4 rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
-        {noticeMessage && <p className="mb-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{noticeMessage}</p>}
+        {errorMessage && <Notice tone="error" className="mb-4">{errorMessage}</Notice>}
+        {noticeMessage && <Notice tone="success" className="mb-4">{noticeMessage}</Notice>}
 
         <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
           <Card title="Open shipments">
-            {jobsError && <p className="mb-4 rounded-md bg-rose-50 p-3 text-sm text-rose-700">Unable to load open shipments. Please refresh or try again.</p>}
-            {!canBid && (
-              <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-800">
-                Your courier profile is <strong>{profile.courier_status}</strong>. Admin approval is required before bidding.
-              </p>
+            {jobsError && <Notice tone="error" className="mb-4">Unable to load open shipments. Please refresh or try again.</Notice>}
+            {!canBid && courierStatusNotice && (
+              <Notice tone={courierStatus === 'rejected' ? 'error' : 'warning'} className="mb-4">
+                Courier status: <StatusBadge status={courierStatus} /> {courierStatusNotice}
+              </Notice>
             )}
             <div className="space-y-4">
               {openJobs.map((job) => {
@@ -250,28 +252,28 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                         </Link>
                         <p className="text-xs text-slate-500">Offered price: {formatMoney(job.offered_price)}</p>
                       </div>
-                      <Badge tone={getStatusTone(job.status)}>{formatStatusLabel(job.status)}</Badge>
+                      <StatusBadge status={job.status} />
                     </div>
                     <div className="space-y-1 text-sm text-slate-600">
                       <p>{job.pickup_address} -&gt; {job.dropoff_address}</p>
                       <p>Pickup: {formatDateTime(job.pickup_at)} - Deadline: {formatDateTime(job.required_by)}</p>
-                      <p>Specimen/package: {job.specimen_type}</p>
+                      <p>Package/item: {job.specimen_type}</p>
                       {job.temperature_requirements && <p>Temperature: {job.temperature_requirements}</p>}
                       {job.chain_of_custody_notes && <p>Chain-of-custody: {job.chain_of_custody_notes}</p>}
                       {job.special_instructions && <p>Special instructions: {job.special_instructions}</p>}
                     </div>
 
                     {alreadyBid ? (
-                      <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">You already submitted a bid for this shipment.</p>
+                      <Notice tone="neutral">You already submitted a bid for this shipment.</Notice>
                     ) : !canBid ? (
-                      <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">Bid actions unlock after admin approval.</p>
+                      <Notice tone="neutral">Bid actions unlock after admin approval.</Notice>
                     ) : (
                       <form action={submitBidAction} className="grid gap-2 rounded-md bg-slate-50 p-3 md:grid-cols-3">
                         <input type="hidden" name="job_id" value={job.id} />
                         <input type="number" min="1" step="0.01" name="amount" placeholder="Bid price ($)" required />
                         <input type="number" min="1" step="1" name="eta_minutes" placeholder="ETA (min)" required />
                         <div className="md:col-span-3">
-                          <p className="mb-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800">{NO_PHI_HELPER_TEXT}</p>
+                          <Notice tone="warning" className="mb-2">{NO_PHI_HELPER_TEXT}</Notice>
                           <input name="note" placeholder="Bid notes" />
                         </div>
                         <button type="submit" className="bg-brand-500 text-white hover:bg-brand-700">
@@ -282,15 +284,15 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                   </article>
                 );
               })}
-              {!jobsError && !openJobs.length && <p className="text-sm text-slate-500">No open shipments are available right now. New shipper requests will appear here.</p>}
+              {!jobsError && !openJobs.length && <EmptyState>No open shipments are available right now. New shipper requests will appear here.</EmptyState>}
             </div>
           </Card>
 
           <div className="space-y-6">
             <Card title="Assigned work">
               <div className="space-y-4">
-                {assignedJobsErrorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{assignedJobsErrorMessage}</p>}
-                {assignedEventsErrorMessage && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{assignedEventsErrorMessage}</p>}
+                {assignedJobsErrorMessage && <Notice tone="error">{assignedJobsErrorMessage}</Notice>}
+                {assignedEventsErrorMessage && <Notice tone="warning">{assignedEventsErrorMessage}</Notice>}
                 {assignedJobs.length ? (
                   assignedJobs.map((job) => (
                     <article key={job.id} className="rounded-lg border border-slate-200 p-4">
@@ -301,12 +303,12 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                           </Link>
                           <p className="text-xs text-slate-500">Accepted bid amount: {formatMoney(job.acceptedBid.amount)}</p>
                         </div>
-                        <Badge tone={getStatusTone(job.status)}>{formatStatusLabel(job.status)}</Badge>
+                        <StatusBadge status={job.status} />
                       </div>
                       <div className="mt-3 space-y-1 text-sm text-slate-600">
                         <p>{job.pickup_address} -&gt; {job.dropoff_address}</p>
                         <p>Pickup: {formatDateTime(job.pickup_at)} - Deadline: {formatDateTime(job.required_by)}</p>
-                        <p>Specimen/package: {job.specimen_type}</p>
+                        <p>Package/item: {job.specimen_type}</p>
                         {job.temperature_requirements && <p>Temperature: {job.temperature_requirements}</p>}
                         {job.chain_of_custody_notes && <p>Chain-of-custody: {job.chain_of_custody_notes}</p>}
                         {job.special_instructions && <p>Special instructions: {job.special_instructions}</p>}
@@ -317,7 +319,7 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                   ))
                 ) : (
                   !assignedJobsErrorMessage && (
-                    <p className="text-sm text-slate-500">No assigned shipments yet. Accepted bids will appear here for pickup and delivery updates.</p>
+                    <EmptyState>No assigned shipments yet. Accepted bids will appear here for pickup and delivery updates.</EmptyState>
                   )
                 )}
               </div>
@@ -325,8 +327,8 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
 
             <Card title="My bids">
               <div className="space-y-3">
-                {bidsError && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">Unable to load your bids. Please refresh or try again.</p>}
-                {bidJobsErrorMessage && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{bidJobsErrorMessage}</p>}
+                {bidsError && <Notice tone="error">Unable to load your bids. Please refresh or try again.</Notice>}
+                {bidJobsErrorMessage && <Notice tone="warning">{bidJobsErrorMessage}</Notice>}
                 {myBids.length ? (
                   myBids.map((bid) => (
                     <article key={bid.id} className="rounded-lg border border-slate-200 p-3">
@@ -340,12 +342,12 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                         </p>
                       )}
                       <div className="mt-2">
-                        <Badge tone={getStatusTone(bid.status)}>{formatStatusLabel(bid.status)}</Badge>
+                        <StatusBadge status={bid.status} />
                       </div>
                     </article>
                   ))
                 ) : (
-                  !bidsError && <p className="text-sm text-slate-500">No bids submitted yet. Submit a bid on an open shipment to track it here.</p>
+                  !bidsError && <EmptyState>No bids submitted yet. Submit a bid on an open shipment to track it here.</EmptyState>
                 )}
               </div>
             </Card>
