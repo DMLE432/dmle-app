@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { Header } from '@/components/header';
-import { Badge, Card } from '@/components/ui';
+import { Card, EmptyState, Notice, StatusBadge } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { acceptBidAction, createShipmentAction } from '@/lib/actions';
-import { formatStatusLabel, getStatusTone, isCompletedShipmentStatus } from '@/lib/status';
+import { isCompletedShipmentStatus } from '@/lib/status';
 import { createClient } from '@/lib/supabase/server';
 import { Database } from '@/types/database';
 
@@ -114,13 +114,22 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
       <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[1fr_1.15fr]">
         <Card title="Post a shipment">
           <form action={createShipmentAction} className="space-y-3">
-            {errorMessage && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</p>}
-            {noticeMessage && <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{noticeMessage}</p>}
-            <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{NO_PHI_HELPER_TEXT}</p>
-            <input name="title" placeholder="Shipment title (e.g. STAT blood sample to central lab)" required />
+            {errorMessage && <Notice tone="error">{errorMessage}</Notice>}
+            {noticeMessage && <Notice tone="success">{noticeMessage}</Notice>}
+            <Notice tone="warning">{NO_PHI_HELPER_TEXT}</Notice>
+            <label className="block text-xs font-medium text-slate-600">
+              Shipment title
+              <input name="title" placeholder="Short logistics summary" className="mt-1" required />
+            </label>
             <div className="grid gap-3 md:grid-cols-2">
-              <input name="pickup_address" placeholder="Pickup address" required />
-              <input name="dropoff_address" placeholder="Delivery address" required />
+              <label className="block text-xs font-medium text-slate-600">
+                Pickup address
+                <input name="pickup_address" placeholder="Pickup address" className="mt-1" required />
+              </label>
+              <label className="block text-xs font-medium text-slate-600">
+                Delivery address
+                <input name="dropoff_address" placeholder="Delivery address" className="mt-1" required />
+              </label>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <label className="text-xs font-medium text-slate-600">
@@ -133,13 +142,31 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
               </label>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <input name="specimen_type" placeholder="Package/specimen type" required />
-              <input type="number" min="1" step="0.01" name="offered_price" placeholder="Offered price ($)" required />
+              <label className="block text-xs font-medium text-slate-600">
+                Package/item category
+                <input name="specimen_type" placeholder="Ambient, refrigerated, frozen, or documents" className="mt-1" required />
+              </label>
+              <label className="block text-xs font-medium text-slate-600">
+                Offered price
+                <input type="number" min="1" step="0.01" name="offered_price" placeholder="USD" className="mt-1" required />
+              </label>
             </div>
-            <input name="temperature_requirements" placeholder="Temperature requirements (e.g. 2-8 C, frozen, ambient)" />
-            <textarea name="chain_of_custody_notes" placeholder="Chain-of-custody notes" rows={3} />
-            <textarea name="special_instructions" placeholder="Special instructions" rows={3} />
-            <textarea name="notes" placeholder="Internal notes (optional)" rows={2} />
+            <label className="block text-xs font-medium text-slate-600">
+              Temperature requirements
+              <input name="temperature_requirements" placeholder="2-8 C, frozen, ambient" className="mt-1" />
+            </label>
+            <label className="block text-xs font-medium text-slate-600">
+              Chain-of-custody notes
+              <textarea name="chain_of_custody_notes" placeholder="Logistics-only handling notes" className="mt-1" rows={3} />
+            </label>
+            <label className="block text-xs font-medium text-slate-600">
+              Special instructions
+              <textarea name="special_instructions" placeholder="Access, dock, timing, or handoff instructions" className="mt-1" rows={3} />
+            </label>
+            <label className="block text-xs font-medium text-slate-600">
+              Internal logistics notes
+              <textarea name="notes" placeholder="Optional logistics note" className="mt-1" rows={2} />
+            </label>
             <button type="submit" className="bg-brand-500 text-white hover:bg-brand-700">
               Publish shipment
             </button>
@@ -148,9 +175,9 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
 
         <Card title="Shipments, bids, and status">
           <div className="space-y-4">
-            {jobsError && <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">Unable to load your shipments. Please refresh or try again.</p>}
-            {bidsErrorMessage && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{bidsErrorMessage}</p>}
-            {statusEventsErrorMessage && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{statusEventsErrorMessage}</p>}
+            {jobsError && <Notice tone="error">Unable to load your shipments. Please refresh or try again.</Notice>}
+            {bidsErrorMessage && <Notice tone="warning">{bidsErrorMessage}</Notice>}
+            {statusEventsErrorMessage && <Notice tone="warning">{statusEventsErrorMessage}</Notice>}
             {jobs.length ? (
               jobs.map((job) => (
                 <article key={job.id} className="rounded-lg border border-slate-200 p-4">
@@ -159,19 +186,19 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                       <Link href={`/shipments/${job.id}`} className="font-medium text-brand-700 hover:underline">{job.title}</Link>
                       <p className="text-xs text-slate-500">Offered price: {formatMoney(job.offered_price)}</p>
                     </div>
-                    <Badge tone={getStatusTone(job.status)}>{formatStatusLabel(job.status)}</Badge>
+                    <StatusBadge status={job.status} />
                   </div>
                   <div className="space-y-1 text-sm text-slate-600">
                     <p>{job.pickup_address} -&gt; {job.dropoff_address}</p>
                     <p>Pickup: {formatDateTime(job.pickup_at)} - Deadline: {formatDateTime(job.required_by)}</p>
-                    <p>Specimen/package: {job.specimen_type}</p>
+                    <p>Package/item: {job.specimen_type}</p>
                     {job.temperature_requirements && <p>Temperature: {job.temperature_requirements}</p>}
                     {job.chain_of_custody_notes && <p>Chain-of-custody: {job.chain_of_custody_notes}</p>}
                     {job.special_instructions && <p>Special instructions: {job.special_instructions}</p>}
                   </div>
 
                   {isCompletedShipmentStatus(job.status) && (
-                    <p className="mt-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Delivery complete. This shipment is read-only.</p>
+                    <Notice tone="success" className="mt-4">Delivery complete. This shipment is read-only and no bid actions are available.</Notice>
                   )}
 
                   <div className="mt-4 space-y-2">
@@ -180,7 +207,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                       job.events.map((event) => (
                         <article key={event.id} className="rounded-md bg-slate-50 p-3 text-sm">
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="font-medium text-slate-900">{formatStatusLabel(event.status)}</p>
+                            <StatusBadge status={event.status} />
                             <p className="text-xs text-slate-500">{formatDateTime(event.created_at)}</p>
                           </div>
                           {event.note && <p className="mt-1 text-slate-700">{event.note}</p>}
@@ -190,7 +217,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                         </article>
                       ))
                     ) : (
-                      <p className="text-sm text-slate-500">No status updates have been recorded for this shipment yet.</p>
+                      <EmptyState>No status updates have been recorded for this shipment yet.</EmptyState>
                     )}
                   </div>
 
@@ -201,7 +228,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                         <div key={bid.id} className="rounded-md bg-slate-50 p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <p className="text-sm font-medium">{formatMoney(bid.amount)} - ETA {bid.eta_minutes} min</p>
-                            <Badge tone={getStatusTone(bid.status)}>{formatStatusLabel(bid.status)}</Badge>
+                            <StatusBadge status={bid.status} />
                           </div>
                           {bid.note && <p className="mt-1 text-sm text-slate-600">{bid.note}</p>}
                           {job.status === 'open' && bid.status === 'pending' && (
@@ -216,13 +243,13 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                         </div>
                       ))
                     ) : (
-                      <p className="text-sm text-slate-500">No bids received yet. Courier bids will appear here when this shipment is open.</p>
+                      <EmptyState>No bids received yet. Courier bids will appear here when this shipment is open.</EmptyState>
                     )}
                   </div>
                 </article>
               ))
             ) : (
-              !jobsError && <p className="text-sm text-slate-500">No shipments posted yet. Publish a shipment to start receiving courier bids.</p>
+              !jobsError && <EmptyState>No shipments posted yet. Publish a shipment to start receiving courier bids.</EmptyState>
             )}
           </div>
         </Card>

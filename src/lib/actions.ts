@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createActionClient } from '@/lib/supabase/server';
-import { getDashboardPath, requireRole } from '@/lib/auth';
+import { getDashboardRedirectPath, requireRole } from '@/lib/auth';
 import { formatStatusLabel } from '@/lib/status';
 import type { Database } from '@/types/database';
 
@@ -61,6 +61,24 @@ function isDuplicateBidError(error: unknown) {
   return maybeError.code === '23505' || maybeError.message?.includes('bids_job_id_courier_id_key') === true;
 }
 
+function getSignUpErrorMessage(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return 'Unable to create account. Please check the form and try again.';
+  }
+
+  const message = String((error as { message?: string }).message || '').toLowerCase();
+
+  if (message.includes('already') || message.includes('registered')) {
+    return 'An account may already exist for this email. Try logging in instead.';
+  }
+
+  if (message.includes('password')) {
+    return 'Unable to create account. Use a password of at least 8 characters.';
+  }
+
+  return 'Unable to create account. Please check the details and try again.';
+}
+
 function validateNoPhiLabels(fields: Record<string, string | null>) {
   for (const [fieldName, value] of Object.entries(fields)) {
     if (!value) continue;
@@ -75,24 +93,28 @@ function validateNoPhiLabels(fields: Record<string, string | null>) {
 }
 
 export async function signUpAction(formData: FormData) {
-  const email = String(formData.get('email') || '');
+  const email = String(formData.get('email') || '').trim();
   const password = String(formData.get('password') || '');
-  const fullName = String(formData.get('full_name') || '');
-  const role = String(formData.get('role') || 'shipper') as 'shipper' | 'courier';
-  const organization = String(formData.get('organization_name') || '');
+  const fullName = String(formData.get('full_name') || '').trim();
+  const rawRole = String(formData.get('role') || 'shipper');
+  const role = rawRole === 'courier' ? 'courier' : 'shipper';
+  const organization = String(formData.get('organization_name') || '').trim();
+
+  if (!email || !password || !fullName) {
+    redirectWithError('/signup', 'Unable to create account. Please enter your name, email, and password.');
+  }
 
   const supabase = await createActionClient();
   const { data, error } = await supabase.auth.signUp({ email, password });
 
   if (error) {
     console.error('Supabase signup error:', error);
-    redirect(`/signup?error=${encodeURIComponent(error.message)}`);
+    redirectWithError('/signup', getSignUpErrorMessage(error));
   }
 
   if (!data.user) {
-    const message = 'No user returned from Supabase signup';
-    console.error(message);
-    redirect(`/signup?error=${encodeURIComponent(message)}`);
+    console.error('Signup error: no user returned from Supabase signup');
+    redirectWithError('/signup', 'Unable to finish account setup. Please try again.');
   }
 
   const courierStatus = role === 'courier' ? 'pending' : null;
@@ -107,11 +129,11 @@ export async function signUpAction(formData: FormData) {
 
   if (profileError) {
     console.error('Profile insert error:', profileError);
-    redirect(`/signup?error=${encodeURIComponent(profileError.message)}`);
+    redirectWithError('/signup', 'Account created, but profile setup could not be completed. Please contact support.');
   }
 
   revalidatePath('/', 'layout');
-  redirect(role === 'courier' ? '/courier?notice=Approval pending' : '/shipper');
+  redirect(getDashboardRedirectPath({ role, courier_status: courierStatus }));
 }
 
 export async function loginAction(formData: FormData) {
@@ -129,7 +151,7 @@ export async function loginAction(formData: FormData) {
     redirectWithError('/login', 'Unable to create a login session. Please try again.');
   }
 
-  const { data: profile, error: profileError } = await supabase.from('profiles').select('role').eq('id', data.user.id).single();
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('role, courier_status').eq('id', data.user.id).single();
 
   if (profileError || !profile) {
     console.error('Profile lookup after login failed:', profileError);
@@ -137,7 +159,7 @@ export async function loginAction(formData: FormData) {
   }
 
   revalidatePath('/', 'layout');
-  redirect(getDashboardPath(profile.role));
+  redirect(getDashboardRedirectPath(profile));
 }
 
 function optionalText(value: FormDataEntryValue | null) {

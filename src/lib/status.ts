@@ -6,8 +6,9 @@ const STATUS_LABELS: Record<string, string> = {
   approved: 'Approved',
   cancelled: 'Cancelled',
   completed: 'Completed',
-  declined: 'Declined',
+  declined: 'Rejected',
   delivered: 'Delivered',
+  en_route_to_pickup: 'En route to pickup',
   in_transit: 'In transit',
   open: 'Open',
   pending: 'Pending',
@@ -15,17 +16,26 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: 'Rejected'
 };
 
+export function normalizeStatus(status: string) {
+  return status.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
 export function formatStatusLabel(status: string) {
-  return STATUS_LABELS[status] ?? status.replaceAll('_', ' ');
+  const normalizedStatus = normalizeStatus(status);
+  const fallbackLabel = normalizedStatus.replaceAll('_', ' ');
+  return STATUS_LABELS[normalizedStatus] ?? fallbackLabel.charAt(0).toUpperCase() + fallbackLabel.slice(1);
 }
 
 export function getStatusTone(status: string): StatusTone {
-  if (status === 'open' || status === 'accepted' || status === 'approved' || status === 'delivered' || status === 'completed') return 'green';
-  if (status === 'pending' || status === 'assigned' || status === 'picked_up' || status === 'in_transit') return 'amber';
-  if (status === 'declined' || status === 'rejected' || status === 'cancelled') return 'red';
+  const normalizedStatus = normalizeStatus(status);
+
+  if (normalizedStatus === 'open' || normalizedStatus === 'accepted' || normalizedStatus === 'approved' || normalizedStatus === 'delivered' || normalizedStatus === 'completed') return 'green';
+  if (normalizedStatus === 'pending' || normalizedStatus === 'assigned' || normalizedStatus === 'picked_up' || normalizedStatus === 'in_transit' || normalizedStatus === 'en_route_to_pickup') return 'amber';
+  if (normalizedStatus === 'declined' || normalizedStatus === 'rejected' || normalizedStatus === 'cancelled') return 'red';
   return 'slate';
 }
 
 export function isCompletedShipmentStatus(status: string) {
-  return status === 'delivered' || status === 'completed';
+  const normalizedStatus = normalizeStatus(status);
+  return normalizedStatus === 'delivered' || normalizedStatus === 'completed';
 }
