@@ -23,7 +23,7 @@ const STATUS_EVENT_NOTES: Record<CourierExecutionStatus, string> = {
   delivered: 'Courier marked the shipment delivered.'
 };
 const NO_PHI_MESSAGE =
-  'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
+  'Use logistics-only details. Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
 const PHI_LABEL_PATTERNS = [
   { label: 'patient name', pattern: /patient\s*name/i },
   { label: 'DOB', pattern: /\bdob\b/i },
@@ -90,6 +90,14 @@ function validateNoPhiLabels(fields: Record<string, string | null>) {
   }
 
   return null;
+}
+
+function getMissingRequiredFieldMessage(fields: Array<{ label: string; value: string }>) {
+  const missingField = fields.find((field) => !field.value.trim());
+
+  if (!missingField) return null;
+
+  return `Unable to create shipment. Please enter ${missingField.label}.`;
 }
 
 export async function signUpAction(formData: FormData) {
@@ -183,7 +191,8 @@ export async function createShipmentAction(formData: FormData) {
   const specimenType = String(formData.get('specimen_type') || '').trim();
   const pickupAt = String(formData.get('pickup_at') || '').trim();
   const requiredBy = String(formData.get('required_by') || '').trim();
-  const offeredPrice = Number(formData.get('offered_price') || 0);
+  const offeredPriceInput = String(formData.get('offered_price') || '').trim();
+  const offeredPrice = Number(offeredPriceInput);
   const temperatureRequirements = optionalText(formData.get('temperature_requirements'));
   const chainOfCustodyNotes = optionalText(formData.get('chain_of_custody_notes'));
   const specialInstructions = optionalText(formData.get('special_instructions'));
@@ -212,12 +221,25 @@ export async function createShipmentAction(formData: FormData) {
     redirect('/dashboard');
   }
 
-  if (!title || !pickupAddress || !dropoffAddress || !specimenType || !pickupAt || !requiredBy) {
-    redirectWithError('/shipper', 'Unable to create shipment. Please complete all required fields.');
+  const missingShipmentFieldMessage = getMissingRequiredFieldMessage([
+    { label: 'a shipment title', value: title },
+    { label: 'a pickup address', value: pickupAddress },
+    { label: 'a delivery address', value: dropoffAddress },
+    { label: 'a package or item category', value: specimenType },
+    { label: 'a pickup date and time', value: pickupAt },
+    { label: 'a delivery deadline', value: requiredBy }
+  ]);
+
+  if (missingShipmentFieldMessage) {
+    redirectWithError('/shipper', missingShipmentFieldMessage);
   }
 
   if (Number.isNaN(Date.parse(pickupAt)) || Number.isNaN(Date.parse(requiredBy))) {
     redirectWithError('/shipper', 'Unable to create shipment. Please enter valid pickup and delivery dates.');
+  }
+
+  if (!offeredPriceInput) {
+    redirectWithError('/shipper', 'Unable to create shipment. Please enter an offered price.');
   }
 
   if (!Number.isFinite(offeredPrice) || offeredPrice <= 0) {
@@ -276,8 +298,10 @@ export async function submitBidAction(formData: FormData) {
   const { user, profile } = await requireRole(['courier']);
   const supabase = await createActionClient();
   const jobId = String(formData.get('job_id') || '');
-  const amount = Number(formData.get('amount') || 0);
-  const etaMinutes = Number(formData.get('eta_minutes') || 0);
+  const amountInput = String(formData.get('amount') || '').trim();
+  const etaInput = String(formData.get('eta_minutes') || '').trim();
+  const amount = Number(amountInput);
+  const etaMinutes = Number(etaInput);
   const note = optionalText(formData.get('note'));
 
   if (profile.courier_status !== 'approved') {
@@ -288,8 +312,16 @@ export async function submitBidAction(formData: FormData) {
     redirectWithError('/courier', 'Unable to submit bid. Missing shipment details.');
   }
 
+  if (!amountInput) {
+    redirectWithError('/courier', 'Unable to submit bid. Please enter a bid price.');
+  }
+
   if (!Number.isFinite(amount) || amount <= 0) {
     redirectWithError('/courier', 'Unable to submit bid. Bid price must be greater than zero.');
+  }
+
+  if (!etaInput) {
+    redirectWithError('/courier', 'Unable to submit bid. Please enter an ETA in minutes.');
   }
 
   if (!Number.isFinite(etaMinutes) || etaMinutes <= 0) {
@@ -468,7 +500,11 @@ export async function updateAssignedJobStatusAction(formData: FormData) {
   }
 
   if (status === 'delivered' && !receivedByName) {
-    redirectWithError(redirectPath, 'Unable to mark delivered. Please enter the logistics-safe name of the receiving person or desk.');
+    redirectWithError(redirectPath, 'Unable to mark delivered. Please enter the logistics-safe name of the receiving staff member, desk, or department.');
+  }
+
+  if (status === 'delivered' && !deliveryNotes) {
+    redirectWithError(redirectPath, 'Unable to mark delivered. Please enter logistics-safe delivery notes for the text-only POD.');
   }
 
   const { data: job, error: jobLookupError } = await supabase

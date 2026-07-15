@@ -17,7 +17,8 @@ type ShipperSearchParams = {
 };
 
 const NO_PHI_HELPER_TEXT =
-  'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
+  'Use logistics-only details. Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
+const FIELD_NO_PHI_HELPER_TEXT = 'Logistics details only. Never include patient or specimen-identifying information.';
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
@@ -112,23 +113,30 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
     <main className="min-h-screen bg-slate-50">
       <Header role="shipper" />
       <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[1fr_1.15fr]">
-        <Card title="Post a shipment">
+        <div className="lg:col-span-2">
+          <Notice tone="info">
+            Next step: Post a shipment request with pickup, delivery, timing, handling, and offered price details. Keep every field logistics-only.
+          </Notice>
+        </div>
+
+        <Card title="Post a shipment request">
           <form action={createShipmentAction} className="space-y-3">
             {errorMessage && <Notice tone="error">{errorMessage}</Notice>}
             {noticeMessage && <Notice tone="success">{noticeMessage}</Notice>}
             <Notice tone="warning">{NO_PHI_HELPER_TEXT}</Notice>
             <label className="block text-xs font-medium text-slate-600">
               Shipment title
-              <input name="title" placeholder="Short logistics summary" className="mt-1" required />
+              <input name="title" placeholder="Short logistics summary, no patient details" className="mt-1" required />
+              <span className="mt-1 block text-xs font-normal text-slate-500">{FIELD_NO_PHI_HELPER_TEXT}</span>
             </label>
             <div className="grid gap-3 md:grid-cols-2">
               <label className="block text-xs font-medium text-slate-600">
                 Pickup address
-                <input name="pickup_address" placeholder="Pickup address" className="mt-1" required />
+                <input name="pickup_address" placeholder="Facility or business pickup location" className="mt-1" required />
               </label>
               <label className="block text-xs font-medium text-slate-600">
                 Delivery address
-                <input name="dropoff_address" placeholder="Delivery address" className="mt-1" required />
+                <input name="dropoff_address" placeholder="Facility or business delivery location" className="mt-1" required />
               </label>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
@@ -157,18 +165,21 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
             </label>
             <label className="block text-xs font-medium text-slate-600">
               Chain-of-custody notes
-              <textarea name="chain_of_custody_notes" placeholder="Logistics-only handling notes" className="mt-1" rows={3} />
+              <textarea name="chain_of_custody_notes" placeholder="Handoff, seal, packaging, or custody steps only" className="mt-1" rows={3} />
+              <span className="mt-1 block text-xs font-normal text-slate-500">{FIELD_NO_PHI_HELPER_TEXT}</span>
             </label>
             <label className="block text-xs font-medium text-slate-600">
-              Special instructions
-              <textarea name="special_instructions" placeholder="Access, dock, timing, or handoff instructions" className="mt-1" rows={3} />
+              Pickup/delivery instructions
+              <textarea name="special_instructions" placeholder="Access, dock, timing, or handoff instructions only" className="mt-1" rows={3} />
+              <span className="mt-1 block text-xs font-normal text-slate-500">{FIELD_NO_PHI_HELPER_TEXT}</span>
             </label>
             <label className="block text-xs font-medium text-slate-600">
               Internal logistics notes
               <textarea name="notes" placeholder="Optional logistics note" className="mt-1" rows={2} />
+              <span className="mt-1 block text-xs font-normal text-slate-500">{FIELD_NO_PHI_HELPER_TEXT}</span>
             </label>
             <button type="submit" className="bg-brand-500 text-white hover:bg-brand-700">
-              Publish shipment
+              Post shipment request
             </button>
           </form>
         </Card>
@@ -217,7 +228,7 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                         </article>
                       ))
                     ) : (
-                      <EmptyState>No status updates have been recorded for this shipment yet.</EmptyState>
+                      <EmptyState>No status updates yet. Pickup, transit, and delivery events will appear here as the assigned courier updates the shipment.</EmptyState>
                     )}
                   </div>
 
@@ -243,13 +254,13 @@ export default async function ShipperPage({ searchParams }: { searchParams: Prom
                         </div>
                       ))
                     ) : (
-                      <EmptyState>No bids received yet. Courier bids will appear here when this shipment is open.</EmptyState>
+                      <EmptyState>No bids yet. Approved couriers will appear here after they respond to this open shipment request.</EmptyState>
                     )}
                   </div>
                 </article>
               ))
             ) : (
-              !jobsError && <EmptyState>No shipments posted yet. Publish a shipment to start receiving courier bids.</EmptyState>
+              !jobsError && <EmptyState>No shipment requests yet. Post a shipment request when you are ready to receive courier bids.</EmptyState>
             )}
           </div>
         </Card>

@@ -17,17 +17,17 @@ const COURIER_GROUPS: { key: CourierStatusGroup; title: string; empty: string }[
   {
     key: 'pending',
     title: 'Pending review',
-    empty: 'No courier profiles are waiting for review.'
+    empty: 'No pending courier applications. New courier signups will appear here for review.'
   },
   {
     key: 'approved',
     title: 'Approved couriers',
-    empty: 'No couriers have been approved yet.'
+    empty: 'No approved couriers yet. Approved courier accounts will appear here.'
   },
   {
     key: 'rejected',
     title: 'Rejected couriers',
-    empty: 'No couriers have been rejected.'
+    empty: 'No rejected courier applications right now.'
   }
 ];
 
@@ -124,6 +124,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         {errorMessage && <Notice tone="error">{errorMessage}</Notice>}
         {noticeMessage && <Notice tone="success">{noticeMessage}</Notice>}
         {couriersError && <Notice tone="error">Courier profiles could not be loaded. Please refresh or try again.</Notice>}
+
+        <Notice tone="info">
+          Next step: approve or reject pending couriers. Approved couriers can bid on open shipment requests; pending and rejected couriers cannot bid.
+        </Notice>
 
         <Notice tone="warning">
           Courier approval uses account profile metadata only. Do not enter patient names, DOB, MRN, diagnosis, test results, insurance

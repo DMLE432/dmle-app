@@ -21,8 +21,9 @@ type CourierSearchParams = {
 };
 
 const NO_PHI_HELPER_TEXT =
-  'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
+  'Use logistics-only details. Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
 const STATUS_NO_PHI_HELPER_TEXT = `Status updates must stay logistics-only. ${NO_PHI_HELPER_TEXT}`;
+const FIELD_NO_PHI_HELPER_TEXT = 'Logistics details only. Never include patient or specimen-identifying information.';
 const ASSIGNED_JOB_STATUSES: JobStatus[] = ['assigned', 'picked_up', 'in_transit', 'delivered', 'completed'];
 const STATUS_ACTIONS: Array<{ status: CourierExecutionStatus; currentStatus: JobStatus; label: string }> = [
   { status: 'picked_up', currentStatus: 'assigned', label: 'Mark picked up' },
@@ -40,6 +41,20 @@ function formatMoney(value: number) {
 
 function getMessage(value?: string | string[]) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function getCourierGuidance(status: Database['public']['Tables']['profiles']['Row']['courier_status']) {
+  if (status === 'approved') {
+    return 'You are approved to bid on open shipment requests. Accepted bids will move into Assigned work for pickup, transit, and delivery updates.';
+  }
+
+  return getCourierStatusNotice(status);
+}
+
+function getCourierGuidanceTone(status: Database['public']['Tables']['profiles']['Row']['courier_status']) {
+  if (status === 'approved') return 'success';
+  if (status === 'rejected') return 'error';
+  return 'warning';
 }
 
 function StatusHistory({ events }: { events: StatusEvent[] }) {
@@ -83,12 +98,14 @@ function AssignedJobActions({ job }: { job: AssignedJob }) {
           <input type="hidden" name="status" value="delivered" />
           <input type="hidden" name="source_path" value="/courier" />
           <label className="block text-sm font-medium text-slate-700">
-            Received by (staff or desk)
-            <input name="received_by_name" placeholder="Receiving staff or desk name" className="mt-1" required />
+            Received by (staff or desk, required)
+            <input name="received_by_name" placeholder="Receiving staff, desk, or department" className="mt-1" required />
+            <span className="mt-1 block text-xs font-normal text-slate-500">Use a work role, desk, department, or staff name only. Do not enter patient information.</span>
           </label>
           <label className="block text-sm font-medium text-slate-700">
-            Delivery notes
-            <textarea name="delivery_notes" placeholder="Logistics-safe delivery notes" className="mt-1" rows={3} />
+            Delivery notes / POD (required)
+            <textarea name="delivery_notes" placeholder="Logistics handoff summary, condition, or access note only" className="mt-1" rows={3} required />
+            <span className="mt-1 block text-xs font-normal text-slate-500">{FIELD_NO_PHI_HELPER_TEXT}</span>
           </label>
           <button type="submit" className="bg-emerald-600 text-white hover:bg-emerald-700">
             Mark delivered
@@ -220,7 +237,7 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
 
   const canBid = profile.courier_status === 'approved';
   const courierStatus = profile.courier_status ?? 'pending';
-  const courierStatusNotice = getCourierStatusNotice(courierStatus);
+  const courierGuidance = getCourierGuidance(courierStatus);
   const bidJobIds = new Set(myBids.map((bid) => bid.job_id));
   const openJobs = jobs ?? [];
 
@@ -230,15 +247,16 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
       <div className="mx-auto max-w-6xl px-6 py-8">
         {errorMessage && <Notice tone="error" className="mb-4">{errorMessage}</Notice>}
         {noticeMessage && <Notice tone="success" className="mb-4">{noticeMessage}</Notice>}
+        {courierGuidance && (
+          <Notice tone={getCourierGuidanceTone(courierStatus)} className="mb-4">
+            Courier status: <StatusBadge status={courierStatus} /> {courierGuidance}
+          </Notice>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
           <Card title="Open shipments">
             {jobsError && <Notice tone="error" className="mb-4">Unable to load open shipments. Please refresh or try again.</Notice>}
-            {!canBid && courierStatusNotice && (
-              <Notice tone={courierStatus === 'rejected' ? 'error' : 'warning'} className="mb-4">
-                Courier status: <StatusBadge status={courierStatus} /> {courierStatusNotice}
-              </Notice>
-            )}
+            {!canBid && <Notice tone="neutral" className="mb-4">Bid actions are locked until an admin approves your courier account.</Notice>}
             <div className="space-y-4">
               {openJobs.map((job) => {
                 const alreadyBid = bidJobIds.has(job.id);
@@ -270,11 +288,21 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                     ) : (
                       <form action={submitBidAction} className="grid gap-2 rounded-md bg-slate-50 p-3 md:grid-cols-3">
                         <input type="hidden" name="job_id" value={job.id} />
-                        <input type="number" min="1" step="0.01" name="amount" placeholder="Bid price ($)" required />
-                        <input type="number" min="1" step="1" name="eta_minutes" placeholder="ETA (min)" required />
+                        <label className="text-xs font-medium text-slate-600">
+                          Bid price
+                          <input type="number" min="1" step="0.01" name="amount" placeholder="USD" className="mt-1" required />
+                        </label>
+                        <label className="text-xs font-medium text-slate-600">
+                          ETA
+                          <input type="number" min="1" step="1" name="eta_minutes" placeholder="Minutes" className="mt-1" required />
+                        </label>
                         <div className="md:col-span-3">
                           <Notice tone="warning" className="mb-2">{NO_PHI_HELPER_TEXT}</Notice>
-                          <input name="note" placeholder="Bid notes" />
+                          <label className="block text-xs font-medium text-slate-600">
+                            Bid notes
+                            <input name="note" placeholder="Optional logistics note for pickup timing or handoff context" className="mt-1" />
+                            <span className="mt-1 block text-xs font-normal text-slate-500">{FIELD_NO_PHI_HELPER_TEXT}</span>
+                          </label>
                         </div>
                         <button type="submit" className="bg-brand-500 text-white hover:bg-brand-700">
                           Submit bid
@@ -284,7 +312,7 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                   </article>
                 );
               })}
-              {!jobsError && !openJobs.length && <EmptyState>No open shipments are available right now. New shipper requests will appear here.</EmptyState>}
+              {!jobsError && !openJobs.length && <EmptyState>No open shipment requests right now. When shippers post requests, they will appear here for approved couriers to bid on.</EmptyState>}
             </div>
           </Card>
 
@@ -319,7 +347,7 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                   ))
                 ) : (
                   !assignedJobsErrorMessage && (
-                    <EmptyState>No assigned shipments yet. Accepted bids will appear here for pickup and delivery updates.</EmptyState>
+                    <EmptyState>No assigned work yet. When a shipper accepts one of your bids, the shipment will appear here for pickup, transit, and delivery updates.</EmptyState>
                   )
                 )}
               </div>
@@ -347,7 +375,7 @@ export default async function CourierPage({ searchParams }: { searchParams: Prom
                     </article>
                   ))
                 ) : (
-                  !bidsError && <EmptyState>No bids submitted yet. Submit a bid on an open shipment to track it here.</EmptyState>
+                  !bidsError && <EmptyState>No bids yet. Submit a bid on an open shipment request to track its status here.</EmptyState>
                 )}
               </div>
             </Card>
