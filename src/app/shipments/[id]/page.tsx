@@ -17,8 +17,9 @@ type ShipmentSearchParams = {
 };
 
 const NO_PHI_HELPER_TEXT =
-  'Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
+  'Use logistics-only details. Do not enter patient names, DOB, MRN, diagnosis, test results, insurance information, or specimen identifiers.';
 const STATUS_NO_PHI_HELPER_TEXT = `Status updates must stay logistics-only. ${NO_PHI_HELPER_TEXT}`;
+const FIELD_NO_PHI_HELPER_TEXT = 'Logistics details only. Never include patient or specimen-identifying information.';
 const STATUS_ACTIONS: Array<{ status: CourierExecutionStatus; currentStatus: JobStatus; label: string }> = [
   { status: 'picked_up', currentStatus: 'assigned', label: 'Mark picked up' },
   { status: 'in_transit', currentStatus: 'picked_up', label: 'Mark in transit' },
@@ -49,12 +50,14 @@ function StatusActions({ job }: { job: Job }) {
           <input type="hidden" name="status" value="delivered" />
           <input type="hidden" name="source_path" value={`/shipments/${job.id}`} />
           <label className="block text-sm font-medium text-slate-700">
-            Received by (staff or desk)
-            <input name="received_by_name" placeholder="Receiving staff or desk name" className="mt-1" required />
+            Received by (staff or desk, required)
+            <input name="received_by_name" placeholder="Receiving staff, desk, or department" className="mt-1" required />
+            <span className="mt-1 block text-xs font-normal text-slate-500">Use a work role, desk, department, or staff name only. Do not enter patient information.</span>
           </label>
           <label className="block text-sm font-medium text-slate-700">
-            Delivery notes
-            <textarea name="delivery_notes" rows={3} placeholder="Logistics-safe delivery notes" className="mt-1" />
+            Delivery notes / POD (required)
+            <textarea name="delivery_notes" rows={3} placeholder="Logistics handoff summary, condition, or access note only" className="mt-1" required />
+            <span className="mt-1 block text-xs font-normal text-slate-500">{FIELD_NO_PHI_HELPER_TEXT}</span>
           </label>
           <button type="submit" className="w-fit bg-emerald-600 text-white hover:bg-emerald-700">
             Mark delivered
