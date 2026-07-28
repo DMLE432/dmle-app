@@ -3,6 +3,14 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createActionClient } from '@/lib/supabase/server';
+import {
+  notifyApprovedCouriersOfNewShipment,
+  notifyBidAccepted,
+  notifyCourierReview,
+  notifyCourierSignupPending,
+  notifyShipperOfNewBid,
+  notifyShipperOfStatusUpdate
+} from '@/lib/email';
 import { getDashboardRedirectPath, requireRole } from '@/lib/auth';
 import { formatStatusLabel } from '@/lib/status';
 import type { Database } from '@/types/database';
@@ -54,6 +62,14 @@ function redirectWithLoggedError(path: string, logMessage: string, error: unknow
   redirectWithError(path, userMessage);
 }
 
+async function runNotification(label: string, notification: () => Promise<void>) {
+  try {
+    await notification();
+  } catch (error) {
+    console.error(`${label} notification failed:`, error);
+  }
+}
+
 function isDuplicateBidError(error: unknown) {
   if (!error || typeof error !== 'object') return false;
 
@@ -101,7 +117,7 @@ function getMissingRequiredFieldMessage(fields: Array<{ label: string; value: st
 }
 
 export async function signUpAction(formData: FormData) {
-  const email = String(formData.get('email') || '').trim();
+  const email = String(formData.get('email') || '').trim().toLowerCase();
   const password = String(formData.get('password') || '');
   const fullName = String(formData.get('full_name') || '').trim();
   const rawRole = String(formData.get('role') || 'shipper');
@@ -129,6 +145,7 @@ export async function signUpAction(formData: FormData) {
 
   const { error: profileError } = await supabase.from('profiles').insert({
     id: data.user.id,
+    email,
     full_name: fullName,
     role,
     organization_name: organization || null,
@@ -140,12 +157,22 @@ export async function signUpAction(formData: FormData) {
     redirectWithError('/signup', 'Account created, but profile setup could not be completed. Please contact support.');
   }
 
+  if (role === 'courier') {
+    await runNotification('Courier signup approval needed', () =>
+      notifyCourierSignupPending({
+        courierName: fullName,
+        organizationName: organization || null,
+        courierEmail: email
+      })
+    );
+  }
+
   revalidatePath('/', 'layout');
   redirect(getDashboardRedirectPath({ role, courier_status: courierStatus }));
 }
 
 export async function loginAction(formData: FormData) {
-  const email = String(formData.get('email') || '');
+  const email = String(formData.get('email') || '').trim().toLowerCase();
   const password = String(formData.get('password') || '');
   const supabase = await createActionClient();
 
@@ -288,6 +315,18 @@ export async function createShipmentAction(formData: FormData) {
     redirectWithError('/shipper', 'Unable to create shipment. Please try again.');
   }
 
+  await runNotification('New shipment available', () =>
+    notifyApprovedCouriersOfNewShipment({
+      id: insertedJob.id,
+      title,
+      pickupAddress,
+      dropoffAddress,
+      pickupAt,
+      requiredBy,
+      offeredPrice
+    })
+  );
+
   revalidatePath('/shipper');
   revalidatePath('/courier');
   revalidatePath('/admin');
@@ -369,6 +408,15 @@ export async function submitBidAction(formData: FormData) {
     console.error('Submit bid error: insert returned no row');
     redirectWithError('/courier', 'Unable to submit bid. Please try again.');
   }
+
+  await runNotification('New bid received', () =>
+    notifyShipperOfNewBid({
+      jobId,
+      amount,
+      etaMinutes,
+      note
+    })
+  );
 
   revalidatePath('/courier');
   revalidatePath('/shipper');
@@ -464,6 +512,8 @@ export async function acceptBidAction(formData: FormData) {
     revalidatePath(`/shipments/${jobId}`);
     redirectWithError('/shipper', 'Bid was accepted, but the assignment timeline could not be recorded. Please contact admin.');
   }
+
+  await runNotification('Bid accepted', () => notifyBidAccepted({ jobId, bidId }));
 
   revalidatePath('/shipper');
   revalidatePath('/courier');
@@ -562,7 +612,8 @@ export async function updateAssignedJobStatusAction(formData: FormData) {
     redirectWithError(redirectPath, 'Unable to update shipment status. The shipment status changed while you were working. Please refresh and try again.');
   }
 
-  const deliveredAt = status === 'delivered' ? new Date().toISOString() : null;
+  const statusTimestamp = new Date().toISOString();
+  const deliveredAt = status === 'delivered' ? statusTimestamp : null;
   const eventNote = status === 'delivered' ? deliveryNotes || STATUS_EVENT_NOTES.delivered : STATUS_EVENT_NOTES[status];
   const { error: statusEventError } = await supabase.from('job_status_events').insert({
     job_id: jobId,
@@ -573,12 +624,24 @@ export async function updateAssignedJobStatusAction(formData: FormData) {
     received_by_name: status === 'delivered' ? receivedByName : null,
     delivery_notes: status === 'delivered' ? deliveryNotes : null,
     delivered_at: deliveredAt,
-    created_by: user.id
+    created_by: user.id,
+    created_at: statusTimestamp
   });
 
   if (statusEventError) {
     redirectWithLoggedError(redirectPath, 'Shipment status event error:', statusEventError, 'Shipment status changed, but the status history could not be recorded. Please contact admin.');
   }
+
+  await runNotification('Shipment status update', () =>
+    notifyShipperOfStatusUpdate({
+      jobId,
+      status,
+      timestamp: statusTimestamp,
+      statusNote: eventNote,
+      receivedByName: status === 'delivered' ? receivedByName : null,
+      deliveryNotes: status === 'delivered' ? deliveryNotes : null
+    })
+  );
 
   revalidatePath(`/shipments/${jobId}`);
   revalidatePath('/courier');
@@ -602,7 +665,7 @@ export async function reviewCourierAction(formData: FormData) {
     .update({ courier_status: decision })
     .eq('id', profileId)
     .eq('role', 'courier')
-    .select('id, full_name')
+    .select('id, email, full_name')
     .maybeSingle();
 
   if (error) {
@@ -612,6 +675,14 @@ export async function reviewCourierAction(formData: FormData) {
   if (!reviewedCourier) {
     redirectWithError('/admin', 'Unable to update courier review. The courier profile was not found.');
   }
+
+  await runNotification('Courier review', () =>
+    notifyCourierReview({
+      courierEmail: reviewedCourier.email,
+      courierName: reviewedCourier.full_name,
+      decision
+    })
+  );
 
   revalidatePath('/admin');
   revalidatePath('/courier');

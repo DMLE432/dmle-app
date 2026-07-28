@@ -6,6 +6,7 @@ export type Database = {
       profiles: {
         Row: {
           id: string;
+          email: string | null;
           full_name: string | null;
           role: 'shipper' | 'courier' | 'admin';
           courier_status: 'pending' | 'approved' | 'rejected' | null;
@@ -14,6 +15,7 @@ export type Database = {
         };
         Insert: {
           id: string;
+          email?: string | null;
           full_name?: string | null;
           role: 'shipper' | 'courier' | 'admin';
           courier_status?: 'pending' | 'approved' | 'rejected' | null;
